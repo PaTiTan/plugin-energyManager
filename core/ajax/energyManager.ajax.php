@@ -46,6 +46,8 @@ try {
 				$e['mode'] = 'auto';
 				$e['active'] = false;
 				$e['tesla_mode'] = 'Stand-By';
+				$e['plugged'] = false;
+				$e['plug_handled'] = false;
 			}
 			$equips[] = $e;
 		}
@@ -55,14 +57,14 @@ try {
 			$base = array('mode' => 'auto', 'piloted' => true, 'is_on' => false, 'power_real' => 0);
 			$equips = array(
 				array_merge($base, array('id' => 9001, 'type' => 'ecs', 'name' => 'Ballon (démo)', 'power_theo' => 3000, 'priority' => 1,
-					'water_temp' => 40, 'min_temp' => 52, 'done_today' => false, 'force_edf' => false, 'zero_threshold' => 20,
+					'water_temp' => 40, 'min_temp' => 50, 'done_today' => false, 'force_edf' => false, 'zero_threshold' => 20,
 					'cut_on_zero' => 1, 'forecast_poor' => false, 'zero_delay' => 120)),
 				array_merge($base, array('id' => 9002, 'type' => 'simple', 'name' => 'Radiateur bureau (démo)', 'power_theo' => 1000, 'priority' => 1,
 					'temp' => 18, 'target' => 20, 'boost' => 2, 'window_open' => false, 'season_heat' => true)),
 				array_merge($base, array('id' => 9003, 'type' => 'simple', 'name' => 'Radiateur étage (démo)', 'power_theo' => 1500, 'priority' => 2,
 					'temp' => 18, 'target' => 20, 'boost' => 2, 'window_open' => false, 'season_heat' => true)),
 				array_merge($base, array('id' => 9004, 'type' => 'tesla', 'name' => 'Tesla (démo)', 'power_theo' => 7200, 'priority' => 3,
-					'active' => false, 'tesla_mode' => 'Stand-By')),
+					'active' => false, 'tesla_mode' => 'Stand-By', 'plugged' => false, 'plug_handled' => false)),
 			);
 		}
 		ajax::success(array(

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- **Tesla branchée = mode Solaire automatique** : energyManager lit si la voiture est branchée (`charge_port_latch` du plugin Tesla, détecté automatiquement depuis teslasmartcharge) et passe teslasmartcharge de Stand-By à Solaire, une seule fois par branchement. Il ne touche jamais aux modes « Non actif » et « Planifié ». Commande « Stand-by » retirée de l'équipement Tesla (Stand-By = voiture débranchée).
+- **Ballon rechauffé si l'eau redescend** : un ballon « terminé » (thermostat atteint) mais dont l'eau est repassée sous le minimum (50 °C par défaut) est de nouveau chauffé, au soleil ou en heure creuse d'après-midi, avant l'heure limite. À l'échéance, s'il est froid : OFF et alerte Discord.
+- Température minimale du ballon : 50 °C par défaut (réglable sur l'équipement).
+- Simulateur : la Tesla se règle en Branchée / Débranchée / Non actif ; on voit energyManager la passer en Solaire.
+
 ## 0.4.2
 
 - **La Tesla n'est jamais bridée** : tant qu'elle est en mode Solaire avec de la place (plage de 2 A / 460 W à 32 A / ~7 kW), la limite Hoymiles reste au maximum, même avec une forte injection. Exception : injection critique qui dure plus de 5 minutes malgré tout (Tesla bloquée) ou maximum légal atteint.

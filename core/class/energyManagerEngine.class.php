@@ -136,6 +136,16 @@ class energyManagerEngine {
 		$teslaHolds = $teslaSolar && $teslaRoom && $cfg['tesla_priority'] === 'tesla'
 			&& !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
 
+		// Tesla branchée : teslasmartcharge reste en Stand-By tant qu'on ne le met pas en Solaire. On le fait UNE fois par branchement
+		// (plug_handled mémorisé côté plugin) ; jamais si le mode est "Non actif" ou "Planifié" choisi par l'utilisateur.
+		foreach ($equips as $e) {
+			if ($e['type'] === 'tesla' && $e['mode'] === 'auto' && !empty($e['plugged']) && empty($e['plug_handled'])
+				&& isset($e['tesla_mode']) && $e['tesla_mode'] === 'Stand-By') {
+				$out['actions'][] = array('type' => 'tesla_mode', 'id' => $e['id'], 'value' => 'Solaire',
+					'reason' => 'voiture branchée : teslasmartcharge passe en mode Solaire');
+			}
+		}
+
 		// Surplus que le BALLON peut réclamer.
 		// Il est prioritaire sur la batterie et sur la Tesla, MAIS seulement si la batterie gardera de quoi tenir la nuit :
 		//  - avec une prévision solaire (kWh restants) : SOC projeté au soir = SOC + (prévision - talon jusqu'au soir - énergie du ballon) / capacité
@@ -157,7 +167,7 @@ class energyManagerEngine {
 			$hoursLeft = max(0, ((float) $cfg['evening'] - $minuteNow) / 60);
 			$ecsKwh = 0;
 			foreach ($equips as $e) {
-				if ($e['type'] === 'ecs' && empty($e['done_today']) && $e['mode'] === 'auto') {
+				if ($e['type'] === 'ecs' && $e['mode'] === 'auto') {
 					$wt = (isset($e['water_temp']) && $e['water_temp'] !== null) ? (float) $e['water_temp'] : 20.0;
 					$ecsKwh += max(0, $cfg['ecs_liters'] * 1.163 * ($cfg['ecs_nominal'] - $wt) / 1000);
 				}
@@ -347,11 +357,11 @@ class energyManagerEngine {
 
 		// échéance du ballon : température nominale non atteinte à l'heure limite => OFF (voir wants) + alerte Discord, une fois par jour
 		foreach ($equips as $e) {
-			if ($e['type'] !== 'ecs' || $e['mode'] !== 'auto' || !empty($e['done_today']) || !empty($e['force_edf'])) {
+			if ($e['type'] !== 'ecs' || $e['mode'] !== 'auto' || !empty($e['force_edf'])) {
 				continue;
 			}
 			$wt = (isset($e['water_temp']) && $e['water_temp'] !== null) ? $e['water_temp'] : null;
-			$coldNow = ($wt === null) || ($wt < (isset($e['min_temp']) ? $e['min_temp'] : 52));
+			$coldNow = ($wt === null) || ($wt < (isset($e['min_temp']) ? $e['min_temp'] : 50));
 			if ($coldNow && $minuteNow >= $cfg['ecs_deadline'] && $minuteNow < $cfg['ecs_deadline'] + 120) {
 				$out['alerts'][] = array('key' => 'ecs_deadline_' . $e['id'], 'level' => 'critical', 'once' => true,
 					'message' => 'Ballon « ' . $e['name'] . ' » : température nominale non atteinte à ' . self::hm($cfg['ecs_deadline'])
@@ -390,16 +400,17 @@ class energyManagerEngine {
 		}
 
 		if ($e['type'] === 'ecs') {
-			if (!empty($e['done_today'])) {
+			$water = isset($e['water_temp']) ? $e['water_temp'] : null;
+			$minT = isset($e['min_temp']) ? $e['min_temp'] : 50;
+			$cold = ($water === null) || ($water < $minT);
+			// "terminé" (thermostat atteint) ne vaut que tant que l'eau reste chaude : si elle redescend sous le minimum, on la rechauffe
+			if (!empty($e['done_today']) && !$cold) {
 				return $no('ballon chaud pour la journée (thermostat atteint)');
 			}
 			// besoin EDF validé par l'utilisateur (réponse Discord) ou chauffe en HC de l'après-midi
 			if (!empty($e['force_edf'])) {
 				return array('want' => true, 'source' => 'edf', 'why' => 'complément EDF validé par l\'utilisateur');
 			}
-			$water = isset($e['water_temp']) ? $e['water_temp'] : null;
-			$minT = isset($e['min_temp']) ? $e['min_temp'] : 52;
-			$cold = ($water === null) || ($water < $minT);
 			// échéance : température nominale non atteinte à l'heure limite => on arrête (et decide() alerte)
 			if ($cold && isset($s['minute']) && (int) $s['minute'] >= $cfg['ecs_deadline']) {
 				return $no('ballon : température nominale non atteinte à ' . self::hm($cfg['ecs_deadline']) . ', passage sur OFF');

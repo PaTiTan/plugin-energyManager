@@ -160,6 +160,8 @@
     // par la voiture ; paliers de 230 W (2 à 32 A) ; un changement doit être confirmé 60 s dans le même sens ; coupure immédiate si la
     // maison se vide (batterie < -50 W) ; en priorité « maison », la voiture attend que la batterie dépasse son seuil.
     byType('tesla').forEach(function (e) {
+      // la voiture débranchée = Stand-By (géré par teslasmartcharge) ; branchée, c'est energyManager qui passe en Solaire
+      if (!e.plugged && e.tesla_mode !== 'Non actif') { e.tesla_mode = 'Stand-By'; e.plug_handled = false }
       e.active = (e.tesla_mode === 'Solaire')
       e.mode = (e.tesla_mode === 'Non actif') ? 'off' : 'auto'
       if (!e.active) { e.power_real = 0; e._t = 0; e._dir = 0 } else {
@@ -202,6 +204,7 @@
   /* ------------------------------------------------------------------ décision (vrai moteur PHP) */
   function describe(a) {
     if (a.type === 'equip') { var e = byId(a.id); return (e ? e.name : '#' + a.id) + ' → ' + String(a.cmd).toUpperCase() + ' : ' + a.reason }
+    if (a.type === 'tesla_mode') { var tm = byId(a.id); return (tm ? tm.name : '#' + a.id) + ' → mode ' + a.value + ' : ' + a.reason }
     if (a.type === 'hoymiles') { return 'Limite Hoymiles → ' + a.value + ' W : ' + a.reason }
     if (a.type === 'charge_limit') { return 'Limite de charge batterie → ' + a.value + ' W : ' + a.reason }
     return JSON.stringify(a)
@@ -233,7 +236,8 @@
         if (a.type === 'equip') {
           var e = byId(a.id)
           if (e) { e.is_on = (a.cmd === 'on'); if (!e.is_on) { e.power_real = 0 } }
-        } else if (a.type === 'hoymiles') { S.hoy = num(a.value) }
+        } else if (a.type === 'tesla_mode') { var te = byId(a.id); if (te) { te.tesla_mode = a.value; te.plug_handled = true } }
+        else if (a.type === 'hoymiles') { S.hoy = num(a.value) }
         else if (a.type === 'charge_limit') { S.chg = num(a.value) }
       })
       r.alerts.forEach(function (al) {
@@ -301,13 +305,16 @@
     S.equips.forEach(function (e, i) {
       var st = (e.type === 'ecs') ? 'eau ' + e.water_temp.toFixed(1) + ' °C' + (e.done_today ? ' · terminé' : '')
         : (e.type === 'simple') ? 'pièce ' + e.temp.toFixed(1) + ' °C (cible ' + e.target + ')'
-        : 'teslasmartcharge : ' + e.tesla_mode
+        : 'teslasmartcharge : ' + e.tesla_mode + (e.plugged ? ' · branchée' : ' · débranchée')
       html += '<div class="ems-tile ' + (e.is_on ? 'on' : '') + (e.piloted ? '' : ' unpiloted') + '">'
         + '<span class="ems-led ' + (e.piloted ? 'ems-g' : 'ems-r') + '" data-act="led" data-i="' + i + '" title="Piloté par energyManager : cliquer pour changer"></span>'
         + esc(e.name) + '<b>' + Math.round(e.power_real) + ' W</b>' + (e.is_on ? 'ON' : 'OFF') + '<div class="ems-st">' + esc(st) + '</div>'
       if (e.type === 'tesla') {
         html += '<select data-act="tmode" data-i="' + i + '">'
-        ;['Solaire', 'Stand-By', 'Non actif'].forEach(function (m) { html += '<option' + (e.tesla_mode === m ? ' selected' : '') + '>' + m + '</option>' })
+        ;[['plug', 'Branchée'], ['unplug', 'Débranchée'], ['off', 'Non actif']].forEach(function (m) {
+          var cur = (e.tesla_mode === 'Non actif') ? 'off' : (e.plugged ? 'plug' : 'unplug')
+          html += '<option value="' + m[0] + '"' + (cur === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'
+        })
         html += '</select>'
       } else {
         ;[['auto', 'Auto'], ['on', 'ON'], ['off', 'OFF']].forEach(function (m) {
@@ -389,7 +396,10 @@
     $('#ems-cons').on('change', 'select[data-act=tmode]', function () {
       var e = S.equips[parseInt($(this).data('i'), 10)]
       if (!e) { return }
-      e.tesla_mode = $(this).val(); log('info', e.name + ' : teslasmartcharge passe en « ' + e.tesla_mode + ' »')
+      var v = $(this).val()
+    if (v === 'off') { e.tesla_mode = 'Non actif'; e.plugged = true; log('info', e.name + ' : teslasmartcharge passe en « Non actif »') }
+    else if (v === 'plug') { e.plugged = true; if (e.tesla_mode === 'Non actif') { e.tesla_mode = 'Stand-By' } e.plug_handled = false; log('info', e.name + ' : voiture branchée') }
+    else { e.plugged = false; e.tesla_mode = 'Stand-By'; e.plug_handled = false; log('info', e.name + ' : voiture débranchée (Stand-By)') }
       S.since = CYCLE
       render()
     })

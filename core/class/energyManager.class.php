@@ -196,6 +196,13 @@ class energyManager extends eqLogic {
 		self::mirror($state, $result, $slot, $simulation);
 
 		foreach ($result['actions'] as $a) {
+			if ($simulation && $a['type'] === 'tesla_mode') {
+				$sk = 'energyManager::tesla_sim_logged::' . $a['id'];
+				if ((int) cache::byKey($sk)->getValue(0) === 1) {
+					continue;
+				}
+				cache::set($sk, 1);
+			}
 			log::add('energyManager', $simulation ? 'info' : 'debug', ($simulation ? '[SIMULATION] ' : '') . self::describeAction($a));
 			if (!$simulation) {
 				self::applyAction($a, $now);
@@ -298,7 +305,7 @@ class energyManager extends eqLogic {
 			} elseif ($type === 'ecs') {
 				$t = self::readCmd($eq->getConfiguration('cmd_water_temp'));
 				$e['water_temp'] = ($t !== null && is_numeric($t['value'])) ? (float) $t['value'] : null;
-				$e['min_temp'] = (float) $eq->getConfiguration('min_temp', 52);
+				$e['min_temp'] = (float) $eq->getConfiguration('min_temp', 50);
 				$e['done_today'] = (cache::byKey('energyManager::ecs_done::' . $eq->getId())->getValue('') === date('Ymd'));
 				$e['force_edf'] = (cache::byKey('energyManager::ecs_force::' . $eq->getId())->getValue('') === date('Ymd'));
 				$e['zero_threshold'] = $zero;
@@ -311,10 +318,45 @@ class energyManager extends eqLogic {
 				$e['mode'] = ($tm === 'Non actif') ? 'off' : 'auto';
 				$e['active'] = ($tm === 'Solaire');
 				$e['tesla_mode'] = $tm;
+				$e['plugged'] = self::teslaPlugged($eq);
+				$e['plug_handled'] = ((int) cache::byKey('energyManager::tesla_plug_handled::' . $eq->getId())->getValue(0) === 1);
+				if ($e['plugged'] === false) {
+					// débranchée : le prochain branchement sera de nouveau pris en charge
+					cache::set('energyManager::tesla_plug_handled::' . $eq->getId(), 0);
+					cache::set('energyManager::tesla_sim_logged::' . $eq->getId(), 0);
+					$e['plug_handled'] = false;
+				}
 			}
 			$list[] = $e;
 		}
 		return $list;
+	}
+
+	/**
+	 * La voiture est-elle branchée ? Lit « charge_port_latch » du plugin Tesla, soit via le champ facultatif de l'équipement,
+	 * soit automatiquement : équipement teslasmartcharge de la commande set_mode, puis son équipement Tesla (tesla_eqlogic_id).
+	 * @return bool|null null si impossible à déterminer
+	 */
+	public static function teslaPlugged($_eq) {
+		$cmd = self::resolveCmd($_eq->getConfiguration('cmd_plugged'));
+		if ($cmd === null) {
+			$mode = self::resolveCmd($_eq->getConfiguration('cmd_set_mode'));
+			$tsc = ($mode !== null) ? $mode->getEqLogic() : null;
+			if (is_object($tsc)) {
+				$teslaEq = eqLogic::byId($tsc->getConfiguration('tesla_eqlogic_id'));
+				if (is_object($teslaEq)) {
+					$cmd = $teslaEq->getCmd(null, 'charge_port_latch');
+				}
+			}
+		}
+		if (!is_object($cmd)) {
+			return null;
+		}
+		$v = mb_strtolower(trim((string) $cmd->execCmd()));
+		if ($v === '') {
+			return null;
+		}
+		return in_array($v, array('engagé', 'engage', 'engaged', 'connected', 'plugged', '1', 'true'), true);
 	}
 
 	/** Saison de chauffe/refroidissement selon les 2 sondes extérieures (moyenne 24 h). */
@@ -409,7 +451,7 @@ class energyManager extends eqLogic {
 			return;
 		}
 		foreach ($_equips as $e) {
-			if ($e['type'] !== 'ecs' || $e['mode'] !== 'auto' || $e['done_today'] || $e['force_edf']) {
+			if ($e['type'] !== 'ecs' || $e['mode'] !== 'auto' || $e['force_edf']) {
 				continue;
 			}
 			if ($e['water_temp'] === null || $e['water_temp'] >= $e['min_temp']) {
@@ -452,6 +494,9 @@ class energyManager extends eqLogic {
 				return 'Limite Hoymiles → ' . $a['value'] . ' W : ' . $a['reason'];
 			case 'charge_limit':
 				return 'Limite de charge batterie → ' . $a['value'] . ' W : ' . $a['reason'];
+			case 'tesla_mode':
+				$te = eqLogic::byId($a['id']);
+				return (is_object($te) ? $te->getName() : '#' . $a['id']) . ' → mode ' . $a['value'] . ' : ' . $a['reason'];
 		}
 		return json_encode($a);
 	}
@@ -471,6 +516,20 @@ class energyManager extends eqLogic {
 				$cmd->execCmd();
 				cache::set('energyManager::last_order::' . $a['id'], json_encode(array('cmd' => $a['cmd'], 't' => $_now)));
 				$eq->checkAndUpdateCmd('last_reason', $a['reason']);
+				break;
+			case 'tesla_mode':
+				$te = eqLogic::byId($a['id']);
+				if (!is_object($te)) {
+					return;
+				}
+				$mc = self::resolveCmd($te->getConfiguration('cmd_set_mode'));
+				if ($mc === null) {
+					self::notify('critical', 'Commande set_mode de teslasmartcharge introuvable pour « ' . $te->getName() . ' ».');
+					return;
+				}
+				$mc->execCmd(array('select' => $a['value']));
+				cache::set('energyManager::tesla_plug_handled::' . $a['id'], 1);
+				$te->checkAndUpdateCmd('mode_info', $a['value']);
 				break;
 			case 'hoymiles':
 				self::sendSlider('cmd_hoy_limit', $a['value'], 'hoy', $_now);
@@ -718,7 +777,10 @@ class energyManager extends eqLogic {
 		$this->createCmd('pilot_off', 'Piloté OFF', 'action', 'other');
 		if ($type === 'tesla') {
 			$this->createCmd('mode_solar', 'Mode solaire', 'action', 'other');
-			$this->createCmd('mode_standby', 'Stand-by', 'action', 'other');
+			$old = $this->getCmd(null, 'mode_standby');
+			if (is_object($old)) {
+				$old->remove(); // retirée : Stand-By = voiture débranchée, géré par teslasmartcharge
+			}
 			$this->createCmd('mode_inactive', 'Non actif', 'action', 'other');
 		} else {
 			$this->createCmd('mode_auto', 'Mode auto', 'action', 'other');
@@ -858,7 +920,7 @@ class energyManagerCmd extends cmd {
 		}
 		if ($type === 'tesla') {
 			// teslasmartcharge : set_mode attend select = Solaire | Stand-By | Non actif
-			$map = array('mode_solar' => 'Solaire', 'mode_standby' => 'Stand-By', 'mode_inactive' => 'Non actif');
+			$map = array('mode_solar' => 'Solaire', 'mode_inactive' => 'Non actif');
 			if (isset($map[$id])) {
 				$target = energyManager::resolveCmd($eq->getConfiguration('cmd_set_mode'));
 				if ($target === null) {

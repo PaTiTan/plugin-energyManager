@@ -174,7 +174,7 @@ function em_eq_val($key, $label, $default, $unit = '', $help = '') {
 							<div class="emType emType-ecs">
 								<legend><i class="fas fa-tint"></i> {{Ballon d'eau chaude}}</legend>
 								<?php em_eq_cmd('cmd_water_temp', '{{Température de l\'eau}}'); ?>
-								<?php em_eq_val('min_temp', '{{Température minimale garantie}}', '52', '°C', '{{Pas de maximum : le thermostat interne coupe seul.}}'); ?>
+								<?php em_eq_val('min_temp', '{{Température minimale garantie}}', '50', '°C', '{{En dessous, le ballon est (re)chauffé avant l\'heure limite. Pas de maximum : le thermostat interne coupe seul.}}'); ?>
 								<?php em_eq_val('zero_threshold', '{{Seuil de consommation nulle}}', '20', 'W'); ?>
 								<?php em_eq_val('zero_delay', '{{Délai avant de conclure « thermostat atteint »}}', '120', 's'); ?>
 								<div class="form-group emField" data-key="cut_on_zero">
@@ -189,6 +189,7 @@ function em_eq_val($key, $label, $default, $unit = '', $help = '') {
 								<?php em_eq_cmd('cmd_set_mode', '{{teslasmartcharge : commande « Définir Mode » (set_mode)}}', 'action', '{{energyManager envoie Solaire, Stand-By ou Non actif.}}'); ?>
 								<?php em_eq_cmd('cmd_mode_info', '{{teslasmartcharge : info « Mode Actuel » (mode_actuel)}}', 'info', '{{teslasmartcharge change de mode seul (voiture débranchée, cible atteinte) : energyManager le lit ici.}}'); ?>
 								<?php em_eq_cmd('cmd_set_priority', '{{teslasmartcharge : commande « Définir Priorité » (set_priorite_charge)}}', 'action', '{{energyManager envoie voiture ou maison selon son sélecteur de priorité.}}'); ?>
+								<?php em_eq_cmd('cmd_plugged', '{{Voiture branchée (facultatif)}}', 'info', '{{Détecté automatiquement depuis le plugin Tesla (charge_port_latch). À renseigner seulement si la détection échoue.}}'); ?>
 								<?php em_eq_cmd('tesla_cmd_power', '{{Puissance réelle de charge}}'); ?>
 								<?php em_eq_val('tesla_power_max', '{{Puissance maximale}}', '7200', 'W', '{{32 A x 230 V environ. La Tesla est considérée comme pleine au-delà de ce seuil moins 500 W.}}'); ?>
 							</div>

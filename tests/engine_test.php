@@ -140,8 +140,8 @@ $r = energyManagerEngine::decide(base(array('pv' => 100, 'hc_afternoon' => true,
 check('ballon : chauffe en HC d\'après-midi sans soleil', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
 
 // 21. Ballon : déjà chaud pour la journée
-$r = energyManagerEngine::decide(base(array('pv' => 100, 'hc_afternoon' => true, 'equips' => array(ecs(array('done_today' => true))))));
-check('ballon terminé : pas de chauffe', find_action($r, 'equip', array('cmd' => 'on')) === null);
+$r = energyManagerEngine::decide(base(array('pv' => 100, 'hc_afternoon' => true, 'equips' => array(ecs(array('done_today' => true, 'water_temp' => 56))))));
+check('ballon terminé et chaud : pas de chauffe', find_action($r, 'equip', array('cmd' => 'on')) === null);
 
 // 22. Ballon : en HC d'après-midi mais le soleil est là (surplus mobilisable : la batterie en absorbe 3000 W), pas d'EDF
 $r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => 0, 'batt' => 3000, 'hc_afternoon' => true, 'equips' => array(ecs()))));
@@ -294,6 +294,42 @@ check('Tesla pas encore démarrée : la charge batterie n\'est pas coupée', fin
 // 29d. Tesla en charge (>= 460 W) et priorité Tesla : batterie à 0 W
 $r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'batt' => 500, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaEnCharge))));
 check('Tesla en charge + priorité Tesla : charge batterie à 0 W', ($a = find_action($r, 'charge_limit')) !== null && $a['value'] == 0);
+
+// 30. Ballon "terminé" à midi mais l'eau est redescendue sous le minimum avant 16 h : on le rechauffe
+$r = energyManagerEngine::decide(base(array('minute' => 13 * 60, 'pv' => 4000, 'grid' => 0, 'batt' => 3000,
+	'equips' => array(ecs(array('done_today' => true, 'water_temp' => 45))))));
+check('ballon terminé mais froid (solaire) : rechauffe', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+$r = energyManagerEngine::decide(base(array('minute' => 15 * 60, 'pv' => 100, 'batt' => 0, 'hc_afternoon' => true,
+	'equips' => array(ecs(array('done_today' => true, 'water_temp' => 45))))));
+check('ballon terminé mais froid (HC d'après-midi) : chauffe EDF', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+$r = energyManagerEngine::decide(base(array('minute' => 16 * 60 + 5, 'pv' => 3000, 'batt' => 0,
+	'equips' => array(ecs(array('done_today' => true, 'water_temp' => 45))))));
+$al = null;
+foreach ($r['alerts'] as $x) { if (strpos($x['key'], 'ecs_deadline') === 0) { $al = $x; } }
+check('ballon terminé mais froid à l'échéance : pas de chauffe et alerte', find_action($r, 'equip', array('cmd' => 'on')) === null && $al !== null);
+
+// 31. Tesla branchée : passage automatique en Solaire, une seule fois par branchement
+$teslaStandby = array('id' => 95, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => false, 'power_real' => 0, 'power_theo' => 7200,
+	'priority' => 1, 'tesla_mode' => 'Stand-By', 'plugged' => true, 'plug_handled' => false);
+$r = energyManagerEngine::decide(base(array('equips' => array($teslaStandby))));
+check('Tesla branchée en Stand-By : passage en Solaire', ($a = find_action($r, 'tesla_mode', array('id' => 95))) !== null && $a['value'] === 'Solaire');
+
+$r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('plug_handled' => true))))));
+check('Tesla déjà prise en charge pour ce branchement : rien', find_action($r, 'tesla_mode') === null);
+
+$r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('plugged' => false))))));
+check('Tesla débranchée : rien', find_action($r, 'tesla_mode') === null);
+
+$r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('mode' => 'off', 'tesla_mode' => 'Non actif'))))));
+check('Tesla « Non actif » : on n'y touche pas', find_action($r, 'tesla_mode') === null);
+
+$r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('tesla_mode' => 'Planifié'))))));
+check('Tesla « Planifié » choisi par l'utilisateur : on n'y touche pas', find_action($r, 'tesla_mode') === null);
+
+$r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('plugged' => null))))));
+check('Tesla : branchement inconnu : rien', find_action($r, 'tesla_mode') === null);
 
 // 25. Plages d'heures creuses (JSON du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');
