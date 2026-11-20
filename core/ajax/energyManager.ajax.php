@@ -48,6 +48,7 @@ try {
 				$e['tesla_mode'] = 'Stand-By';
 				$e['plugged'] = false;
 				$e['plug_handled'] = false;
+				$e['margin'] = 0;
 			}
 			$equips[] = $e;
 		}
@@ -64,7 +65,7 @@ try {
 				array_merge($base, array('id' => 9003, 'type' => 'simple', 'name' => 'Radiateur étage (démo)', 'power_theo' => 1500, 'priority' => 2,
 					'temp' => 18, 'target' => 20, 'boost' => 2, 'window_open' => false, 'season_heat' => true)),
 				array_merge($base, array('id' => 9004, 'type' => 'tesla', 'name' => 'Tesla (démo)', 'power_theo' => 7200, 'priority' => 3,
-					'active' => false, 'tesla_mode' => 'Stand-By', 'plugged' => false, 'plug_handled' => false)),
+					'active' => false, 'tesla_mode' => 'Stand-By', 'plugged' => false, 'plug_handled' => false, 'margin' => 0, 'aggr_w' => 1000)),
 			);
 		}
 		ajax::success(array(

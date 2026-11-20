@@ -187,9 +187,11 @@ check('Tesla sans réaction après le délai : le radiateur démarre', find_acti
 $r = energyManagerEngine::decide(base(array('grid' => -2500, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire, rad(1)), 'mem' => array('inj_any_since' => 1000000 - 10))));
 check('grosse injection : on n\'attend pas la Tesla', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
 
-// 24e. Priorité Tesla : pas de bridage Hoymiles pendant qu'elle monte
+// 24e. Tesla à déclencher : 500 W d'injection tolérés (+200 de bande), pas de bridage en dessous
+$r = energyManagerEngine::decide(base(array('grid' => -650, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
+check('Tesla à déclencher : 650 W d'injection tolérés, Hoymiles non bridé', find_action($r, 'hoymiles') === null);
 $r = energyManagerEngine::decide(base(array('grid' => -800, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
-check('priorité Tesla : Hoymiles non bridé pendant la montée', find_action($r, 'hoymiles') === null);
+check('Tesla à déclencher : 800 W > budget 500 W, réduction jusqu'au budget (pas à zéro)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3700);
 
 // 24f. Tesla déjà à fond : plus de place, les autres consommateurs peuvent démarrer
 $teslaPleine = array_merge($teslaSolaire, array('power_real' => 6900));
@@ -252,8 +254,8 @@ check('après l\'échéance : complément EDF validé', find_action($r, 'equip',
 // 28. Hoymiles : une charge arrive (Tesla en mode solaire avec de la place) => limite remise au max IMMÉDIATEMENT
 $teslaBranchee = array('id' => 92, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 0, 'power_theo' => 7000, 'priority' => 1);
 $r = energyManagerEngine::decide(base(array('pv' => 2000, 'grid' => -100, 'hoy_limit' => 2000, 'equips' => array($teslaBranchee),
-	'mem' => array('last_hoy_write' => 1000000 - 5))));
-check('charge qui arrive : limite remise au max sans attendre', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 7600);
+	'mem' => array('last_hoy_write' => 1000000 - 60))));
+check('Tesla à déclencher : on libère 500 W (pas tout d'un coup)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 2500);
 
 // 28b. Rien à alimenter (batterie pleine, pas de charge) : la limite bridée reste bridée
 $r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 2000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(),
@@ -279,7 +281,7 @@ check('ballon > 50 °C et injection critique : limite bridée', ($a = find_actio
 $teslaEnCharge = array('id' => 93, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 1500, 'power_theo' => 7200, 'priority' => 1);
 $r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equips' => array($teslaEnCharge),
 	'mem' => array('inj_any_since' => 1000000 - 400, 'inj_since' => 1000000 - 100))));
-check('Tesla en charge avec de la place : Hoymiles jamais bridé', find_action($r, 'hoymiles') === null);
+check('Tesla en charge (budget 1000 W) : réduction seulement jusqu'au budget', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 5500);
 
 // 29b. Tesla bloquée (injection critique depuis plus de 5 min) : on finit par brider pour ne pas injecter
 $r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equips' => array($teslaEnCharge),
@@ -330,6 +332,49 @@ check('Tesla « Planifié » choisi par l'utilisateur : on n'y touche pas', find
 
 $r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('plugged' => null))))));
 check('Tesla : branchement inconnu : rien', find_action($r, 'tesla_mode') === null);
+
+// 32. Agressivité grande (2000 W) : paliers plus larges une fois la charge en cours
+$teslaGrande = array_merge($teslaEnCharge, array('aggr_w' => 2000, 'power_real' => 3000));
+$r = energyManagerEngine::decide(base(array('pv' => 7000, 'grid' => -3000, 'equips' => array($teslaGrande),
+	'mem' => array('tesla_prev_w' => 3000, 'inj_since' => 1000000 - 30))));
+check('agressivité grande : budget 2000 W', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 6000);
+
+// 32b. Même agressivité mais Tesla pas encore en charge : seulement 500 W pour la déclencher
+$teslaGrandeAttente = array_merge($teslaGrande, array('power_real' => 0));
+$r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => -800, 'equips' => array($teslaGrandeAttente))));
+check('agressivité grande mais Tesla à l'arrêt : budget 500 W', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3700);
+
+// 32c. Tesla en charge qui a consommé ce qui était libéré : palier suivant (+budget)
+$teslaMoyenne = array_merge($teslaEnCharge, array('aggr_w' => 1000, 'power_real' => 3000));
+$r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -100, 'hoy_limit' => 5000, 'equips' => array($teslaMoyenne),
+	'mem' => array('tesla_prev_w' => 3000, 'last_hoy_write' => 1000000 - 60))));
+check('Tesla consomme la puissance libérée : palier de +1000 W', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 6000);
+
+// 32d. Réglage manuel de la charge Tesla à la hausse : limite au maximum immédiatement
+$teslaManuelle = array_merge($teslaEnCharge, array('power_real' => 5000));
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'hoy_limit' => 3000, 'equips' => array($teslaManuelle),
+	'mem' => array('tesla_prev_w' => 0, 'last_hoy_write' => 1000000 - 5))));
+check('charge Tesla augmentée à la main : limite au maximum', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 7600);
+
+// 32e. Marge EDF de teslasmartcharge (négative = soutirage toléré) : un soutirage inférieur ne déclenche pas de réaction
+$teslaMarge = array_merge($teslaBranchee, array('margin' => -300));
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 200, 'hoy_limit' => 3000, 'equips' => array($teslaMarge),
+	'mem' => array('tesla_prev_w' => 0, 'last_hoy_write' => 1000000 - 60))));
+check('marge EDF -300 W : soutirage de 200 W toléré (pas de retour au maximum)', ($a = find_action($r, 'hoymiles')) === null || $a['value'] != 7600);
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 200, 'hoy_limit' => 3000, 'equips' => array($teslaBranchee),
+	'mem' => array('tesla_prev_w' => 0, 'last_hoy_write' => 1000000 - 60))));
+check('sans marge : soutirage de 200 W, limite au maximum', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 7600);
+
+// 32f. Pas d'alerte « injection critique » pendant que la Tesla monte dans son budget
+$r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -1500, 'equips' => array($teslaGrande),
+	'mem' => array('tesla_prev_w' => 3000, 'inj_since' => 1000000 - 60))));
+$k = false;
+foreach ($r['alerts'] as $x) { if ($x['key'] === 'injection') { $k = true; } }
+check('Tesla dans son budget : pas d'alerte d'injection critique', !$k);
+$r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -1500, 'equips' => array(), 'mem' => array('inj_since' => 1000000 - 60))));
+$k = false;
+foreach ($r['alerts'] as $x) { if ($x['key'] === 'injection') { $k = true; } }
+check('sans Tesla : alerte d'injection critique', $k);
 
 // 25. Plages d'heures creuses (JSON du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');

@@ -8,7 +8,7 @@
   "author": "patitan",
   "require": "4.4",
   "category": "energy",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "changelog": "https://github.com/PaTiTan/plugin-energyManager/blob/main/docs/fr_FR/changelog.md",
   "documentation": "https://github.com/PaTiTan/plugin-energyManager/blob/main/docs/fr_FR/index.md",
   "specialAttributes": {

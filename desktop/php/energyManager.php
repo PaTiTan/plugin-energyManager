@@ -189,6 +189,17 @@ function em_eq_val($key, $label, $default, $unit = '', $help = '') {
 								<?php em_eq_cmd('cmd_set_mode', '{{teslasmartcharge : commande « Définir Mode » (set_mode)}}', 'action', '{{energyManager envoie Solaire, Stand-By ou Non actif.}}'); ?>
 								<?php em_eq_cmd('cmd_mode_info', '{{teslasmartcharge : info « Mode Actuel » (mode_actuel)}}', 'info', '{{teslasmartcharge change de mode seul (voiture débranchée, cible atteinte) : energyManager le lit ici.}}'); ?>
 								<?php em_eq_cmd('cmd_set_priority', '{{teslasmartcharge : commande « Définir Priorité » (set_priorite_charge)}}', 'action', '{{energyManager envoie voiture ou maison selon son sélecteur de priorité.}}'); ?>
+								<div class="form-group emField" data-key="aggressiveness">
+									<label class="col-sm-4 control-label">{{Agressivité}} <sup><i class="fas fa-question-circle tooltips" title="{{Puissance libérée à la fois sur la limite des micro-onduleurs une fois la charge en cours. Avant, seuls 500 W sont libérés pour déclencher la charge.}}"></i></sup></label>
+									<div class="col-sm-4">
+										<select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="aggressiveness">
+											<option value="small">{{Petite : paliers de 500 W}}</option>
+											<option value="medium" selected>{{Moyenne : paliers de 1000 W}}</option>
+											<option value="large">{{Grande : paliers de 2000 W}}</option>
+										</select>
+									</div>
+								</div>
+								<?php em_eq_cmd('cmd_margin', '{{Marge EDF de teslasmartcharge (facultatif)}}', 'info', '{{Détectée automatiquement (marge_actuelle). Une marge négative autorise un soutirage EDF que energyManager accepte sans réagir.}}'); ?>
 								<?php em_eq_cmd('cmd_plugged', '{{Voiture branchée (facultatif)}}', 'info', '{{Détecté automatiquement depuis le plugin Tesla (charge_port_latch). À renseigner seulement si la détection échoue.}}'); ?>
 								<?php em_eq_cmd('tesla_cmd_power', '{{Puissance réelle de charge}}'); ?>
 								<?php em_eq_val('tesla_power_max', '{{Puissance maximale}}', '7200', 'W', '{{32 A x 230 V environ. La Tesla est considérée comme pleine au-delà de ce seuil moins 500 W.}}'); ?>

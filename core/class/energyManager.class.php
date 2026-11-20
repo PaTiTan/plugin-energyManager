@@ -319,6 +319,10 @@ class energyManager extends eqLogic {
 				$e['active'] = ($tm === 'Solaire');
 				$e['tesla_mode'] = $tm;
 				$e['plugged'] = self::teslaPlugged($eq);
+				$e['margin'] = self::teslaMargin($eq);
+				$aggr = array('small' => 500, 'medium' => 1000, 'large' => 2000);
+				$ag = $eq->getConfiguration('aggressiveness', 'medium');
+				$e['aggr_w'] = isset($aggr[$ag]) ? $aggr[$ag] : 1000;
 				$e['plug_handled'] = ((int) cache::byKey('energyManager::tesla_plug_handled::' . $eq->getId())->getValue(0) === 1);
 				if ($e['plugged'] === false) {
 					// débranchée : le prochain branchement sera de nouveau pris en charge
@@ -333,22 +337,43 @@ class energyManager extends eqLogic {
 	}
 
 	/**
-	 * La voiture est-elle branchée ? Lit « charge_port_latch » du plugin Tesla, soit via le champ facultatif de l'équipement,
-	 * soit automatiquement : équipement teslasmartcharge de la commande set_mode, puis son équipement Tesla (tesla_eqlogic_id).
-	 * @return bool|null null si impossible à déterminer
+	 * Commande info liée à la Tesla : champ facultatif de l'équipement, sinon détection automatique via la commande set_mode
+	 * (équipement teslasmartcharge) : commande « $_tscLogical » de teslasmartcharge ou « $_teslaLogical » de l'équipement Tesla.
 	 */
-	public static function teslaPlugged($_eq) {
-		$cmd = self::resolveCmd($_eq->getConfiguration('cmd_plugged'));
-		if ($cmd === null) {
-			$mode = self::resolveCmd($_eq->getConfiguration('cmd_set_mode'));
-			$tsc = ($mode !== null) ? $mode->getEqLogic() : null;
-			if (is_object($tsc)) {
-				$teslaEq = eqLogic::byId($tsc->getConfiguration('tesla_eqlogic_id'));
-				if (is_object($teslaEq)) {
-					$cmd = $teslaEq->getCmd(null, 'charge_port_latch');
+	private static function teslaInfoCmd($_eq, $_cfgKey, $_tscLogical, $_teslaLogical = '') {
+		$cmd = self::resolveCmd($_eq->getConfiguration($_cfgKey));
+		if ($cmd !== null) {
+			return $cmd;
+		}
+		$mode = self::resolveCmd($_eq->getConfiguration('cmd_set_mode'));
+		$tsc = ($mode !== null) ? $mode->getEqLogic() : null;
+		if (!is_object($tsc)) {
+			return null;
+		}
+		if ($_tscLogical !== '') {
+			$c = $tsc->getCmd(null, $_tscLogical);
+			if (is_object($c)) {
+				return $c;
+			}
+		}
+		if ($_teslaLogical !== '') {
+			$teslaEq = eqLogic::byId($tsc->getConfiguration('tesla_eqlogic_id'));
+			if (is_object($teslaEq)) {
+				$c = $teslaEq->getCmd(null, $_teslaLogical);
+				if (is_object($c)) {
+					return $c;
 				}
 			}
 		}
+		return null;
+	}
+
+	/**
+	 * La voiture est-elle branchée ? Lit « charge_port_latch » du plugin Tesla.
+	 * @return bool|null null si impossible à déterminer
+	 */
+	public static function teslaPlugged($_eq) {
+		$cmd = self::teslaInfoCmd($_eq, 'cmd_plugged', '', 'charge_port_latch');
 		if (!is_object($cmd)) {
 			return null;
 		}
@@ -357,6 +382,13 @@ class energyManager extends eqLogic {
 			return null;
 		}
 		return in_array($v, array('engagé', 'engage', 'engaged', 'connected', 'plugged', '1', 'true'), true);
+	}
+
+	/** Marge de teslasmartcharge (W, -300 à +300) : négative = soutirage EDF toléré. 0 si inconnue. */
+	public static function teslaMargin($_eq) {
+		$cmd = self::teslaInfoCmd($_eq, 'cmd_margin', 'marge_actuelle');
+		$v = is_object($cmd) ? $cmd->execCmd() : null;
+		return is_numeric($v) ? (float) $v : 0.0;
 	}
 
 	/** Saison de chauffe/refroidissement selon les 2 sondes extérieures (moyenne 24 h). */
@@ -618,8 +650,18 @@ class energyManager extends eqLogic {
 			self::sendAlert($al['key'], $al['level'], $al['message'], $_now);
 		}
 		foreach (array('stale', 'incoherent', 'injection', 'injection_legal') as $k) {
-			if (!isset($active[$k])) {
-				cache::set('energyManager::alert::' . $k, 0); // résolue : on réarme
+			// réarmement antirebond : une alerte n'est réarmée qu'après alert_rearm secondes (120) sans réapparaître,
+			// pour éviter qu'un problème qui clignote ne renvoie un message Discord à chaque va-et-vient
+			$ck = 'energyManager::alert_clear::' . $k;
+			if (isset($active[$k])) {
+				cache::set($ck, 0);
+				continue;
+			}
+			$since = (int) cache::byKey($ck)->getValue(0);
+			if ($since === 0) {
+				cache::set($ck, $_now);
+			} elseif (($_now - $since) >= (int) self::cfg('alert_rearm', 120)) {
+				cache::set('energyManager::alert::' . $k, 0);
 			}
 		}
 	}

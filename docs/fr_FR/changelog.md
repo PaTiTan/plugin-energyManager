@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- **Correctif : boucle de la limite Hoymiles** (réduction puis retour au maximum toutes les 10 s, écritures répétées du curseur et alertes en rafale).
+- **Agressivité de la Tesla** (équipement Tesla) : Petite 500 W, Moyenne 1000 W, Grande 2000 W. Tant que la Tesla ne charge pas, seuls 500 W sont libérés sur la limite des micro-onduleurs pour déclencher la charge ; une fois en charge, la limite monte par paliers de l'agressivité à mesure que la Tesla consomme ce qui a été libéré. Au-delà du budget d'injection, on réduit seulement jusqu'au budget (jamais jusqu'à zéro tant que la Tesla peut absorber).
+- Une hausse manuelle de la charge de la Tesla remet la limite au maximum immédiatement.
+- **Marge EDF de teslasmartcharge** : lue automatiquement (`marge_actuelle`). Une marge négative autorise un soutirage EDF que energyManager accepte sans réagir.
+- Alertes Discord antirebond : une alerte n'est réarmée qu'après 120 s sans réapparaître ; pas d'alerte « injection critique » pendant que la Tesla monte dans son budget.
+- Simulateur : agressivité et marge de la Tesla réglables.
+
 ## 0.5.0
 
 - **Tesla branchée = mode Solaire automatique** : energyManager lit si la voiture est branchée (`charge_port_latch` du plugin Tesla, détecté automatiquement depuis teslasmartcharge) et passe teslasmartcharge de Stand-By à Solaire, une seule fois par branchement. Il ne touche jamais aux modes « Non actif » et « Planifié ». Commande « Stand-by » retirée de l'équipement Tesla (Stand-By = voiture débranchée).

@@ -116,6 +116,9 @@
     makeGauge('right', { label: '🌡 Température des pièces', min: 5, max: 28, step: 0.5, unit: ' °C', color: '#d9534f',
       get: function () { return avg(byType('simple'), 'temp') },
       set: function (v) { byType('simple').forEach(function (e) { e.temp = v }) } })
+    makeGauge('right', { label: '🚗 Marge Tesla (négative = soutirage EDF toléré)', min: -300, max: 300, step: 50, unit: ' W', color: '#d98a4a',
+      get: function () { var t = byType('tesla'); return t.length ? (t[0].margin || 0) : null },
+      set: function (v) { byType('tesla').forEach(function (e) { e.margin = v }) } })
     makeGauge('right', { label: '🌙 Réserve de nuit : SOC à laisser au soir', min: 0, max: 100, step: 5, unit: ' %', color: '#8e7cc3',
       get: function () { return S.reserve }, set: function (v) { S.reserve = v } })
     makeGauge('right', { label: '🔮 Prévision solaire restante (si cochée)', min: 0, max: 40, step: 1, unit: ' kWh', color: '#f5d76e',
@@ -165,7 +168,7 @@
       e.active = (e.tesla_mode === 'Solaire')
       e.mode = (e.tesla_mode === 'Non actif') ? 'off' : 'auto'
       if (!e.active) { e.power_real = 0; e._t = 0; e._dir = 0 } else {
-        var allow = S.batt - S.grid + e.power_real
+        var allow = S.batt - S.grid + e.power_real - (e.margin || 0)     // marge de teslasmartcharge : négative = soutirage EDF toléré
         var amps = Math.min(32, Math.floor(allow / 230))
         if (amps < 2) { amps = 0 }
         var target = Math.min(amps * 230, e.power_theo || TESLA_MAX)
@@ -316,6 +319,11 @@
           html += '<option value="' + m[0] + '"' + (cur === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'
         })
         html += '</select>'
+        html += ' <select data-act="aggr" data-i="' + i + '" title="Agressivité : paliers libérés sur la limite Hoymiles">'
+        ;[[500, 'Petite 500 W'], [1000, 'Moyenne 1000 W'], [2000, 'Grande 2000 W']].forEach(function (m) {
+          html += '<option value="' + m[0] + '"' + (num(e.aggr_w || 1000) === m[0] ? ' selected' : '') + '>' + m[1] + '</option>'
+        })
+        html += '</select>'
       } else {
         ;[['auto', 'Auto'], ['on', 'ON'], ['off', 'OFF']].forEach(function (m) {
           html += '<a class="btn btn-xs btn-default' + (e.mode === m[0] ? ' active' : '') + '" data-act="mode" data-i="' + i + '" data-v="' + m[0] + '">' + m[1] + '</a>'
@@ -392,6 +400,10 @@
       else if (a === 'edf') { e.force_edf = !e.force_edf; log('info', e.name + (e.force_edf ? ' : complément EDF validé (réponse Discord « Oui »)' : ' : complément EDF annulé')) }
       S.since = CYCLE
       render()
+    })
+    $('#ems-cons').on('change', 'select[data-act=aggr]', function () {
+      var e = S.equips[parseInt($(this).data('i'), 10)]
+      if (e) { e.aggr_w = num($(this).val()); log('info', e.name + ' : agressivité ' + e.aggr_w + ' W') }
     })
     $('#ems-cons').on('change', 'select[data-act=tmode]', function () {
       var e = S.equips[parseInt($(this).data('i'), 10)]
