@@ -170,7 +170,7 @@ class energyManager extends eqLogic {
 				$state['equips'][] = $e;
 			}
 		}
-		$active = ((int) self::cfg('active', 1) === 1);
+		$active = ((int) self::cfg('pilot_active', 1) === 1);
 		try {
 			self::learnNight($state, $now, $minute); // apprentissage de la consommation de nuit (indépendant du pilotage)
 		} catch (Throwable $e) {
@@ -217,7 +217,16 @@ class energyManager extends eqLogic {
 				}
 				cache::set($sk, 1);
 			}
-			log::add('energyManager', $simulation ? 'info' : 'debug', ($simulation ? '[SIMULATION] ' : '') . self::describeAction($a));
+			$line = self::describeAction($a);
+			if ($simulation) {
+				// en simulation rien n'est envoyé, donc le même ordre revient à chaque cycle : on ne le journalise que toutes les 5 minutes
+				$lk = 'energyManager::simlog::' . md5($line);
+				if (($now - (int) cache::byKey($lk)->getValue(0)) < 300) {
+					continue;
+				}
+				cache::set($lk, $now);
+			}
+			log::add('energyManager', $simulation ? 'info' : 'debug', ($simulation ? '[SIMULATION] ' : '') . $line);
 			if (!$simulation) {
 				self::applyAction($a, $now);
 			}
@@ -226,7 +235,9 @@ class energyManager extends eqLogic {
 			self::syncTeslaPriority();
 		}
 		self::checkFeedback($now);
-		self::ecsAsk($state['equips'], $minute, $hcAfternoonEnd);
+		if (!$simulation) {
+			self::ecsAsk($state['equips'], $minute, $hcAfternoonEnd); // la question Discord est un ordre : pas en simulation
+		}
 		self::handleAlerts($result['alerts'], $now);
 		return $result;
 	}
@@ -742,7 +753,7 @@ class energyManager extends eqLogic {
 	 * Ne renvoie l'ordre que si la valeur a changé (ou si la Tesla vient d'être ajoutée).
 	 */
 	public static function syncTeslaPriority() {
-		if ((int) self::cfg('active', 1) !== 1) {
+		if ((int) self::cfg('pilot_active', 1) !== 1) {
 			return; // pilotage général désactivé : on n'envoie rien à teslasmartcharge
 		}
 		$wanted = (self::cfg('tesla_priority', 'tesla') === 'tesla') ? 'voiture' : 'maison';
@@ -886,7 +897,7 @@ class energyManager extends eqLogic {
 		if (isset($_result['info']['injection'])) {
 			$main->checkAndUpdateCmd('injection', $_result['info']['injection']);
 		}
-		$main->checkAndUpdateCmd('active_info', (int) self::cfg('active', 1));
+		$main->checkAndUpdateCmd('active_info', (int) self::cfg('pilot_active', 1));
 		$main->checkAndUpdateCmd('reserve_info', self::effectiveReserve());
 		$main->checkAndUpdateCmd('reserve_text', self::reserveText());
 		$main->checkAndUpdateCmd('reserve_auto_info', self::reserveAuto() ? 1 : 0);
@@ -1099,11 +1110,11 @@ class energyManagerCmd extends cmd {
 					$eq->checkAndUpdateCmd('reserve_info', energyManager::effectiveReserve());
 					break;
 				case 'active_on':
-					config::save('active', 1, 'energyManager');
+					config::save('pilot_active', 1, 'energyManager'); // jamais la clé "active" : c'est l'état d'activation du plugin dans Jeedom
 					$eq->checkAndUpdateCmd('active_info', 1);
 					break;
 				case 'active_off':
-					config::save('active', 0, 'energyManager');
+					config::save('pilot_active', 0, 'energyManager');
 					$eq->checkAndUpdateCmd('active_info', 0);
 					break;
 				case 'ecs_answer':

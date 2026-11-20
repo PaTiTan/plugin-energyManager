@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2
+
+- **Correctif majeur : le plugin se désactivait.** L'interrupteur « Pilotage » enregistrait son état dans la clé de configuration `active`, qui est aussi celle que Jeedom utilise pour l'activation du plugin : passer le pilotage au rouge désactivait tout le plugin (et le démon). L'état du pilotage utilise maintenant la clé `pilot_active` ; au premier démarrage le pilotage est actif.
+- La question Discord « Compléter avec EDF ? » n'est plus envoyée en mode simulation.
+- En simulation, un même ordre n'est journalisé qu'une fois toutes les 5 minutes (au lieu de chaque cycle).
+
 ## 0.7.1
 
 - Robustesse : une erreur lors de l'installation ou de la mise à jour d'un équipement, ou dans un cycle du démon, est journalisée (fichier et ligne) au lieu de faire échouer ou désactiver le plugin.
