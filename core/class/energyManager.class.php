@@ -123,8 +123,9 @@ class energyManager extends eqLogic {
 	public static function daemon() {
 		try {
 			self::runCycle(false);
-		} catch (Exception $e) {
-			log::add('energyManager', 'error', 'Cycle en erreur : ' . $e->getMessage());
+		} catch (Throwable $e) {
+			// Throwable : attrape aussi les erreurs PHP (TypeError...), sinon le démon s'arrête sans rien dire
+			log::add('energyManager', 'error', 'Cycle en erreur : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 		}
 	}
 
@@ -170,7 +171,11 @@ class energyManager extends eqLogic {
 			}
 		}
 		$active = ((int) self::cfg('active', 1) === 1);
-		self::learnNight($state, $now, $minute); // apprentissage de la consommation de nuit (indépendant du pilotage)
+		try {
+			self::learnNight($state, $now, $minute); // apprentissage de la consommation de nuit (indépendant du pilotage)
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Apprentissage de la nuit : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+		}
 		$fc = self::readCmd(self::cfg('cmd_forecast_kwh'));
 		$state['forecast_kwh'] = ($fc !== null && is_numeric($fc['value'])) ? (float) $fc['value'] : null;
 		$inv = self::readCmd(self::cfg('cmd_inv_limit_fb'));

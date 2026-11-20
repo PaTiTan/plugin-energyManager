@@ -22,13 +22,26 @@ function energyManager_install() {
 	config::save('simulation', 1, 'energyManager');
 	config::save('tesla_priority', 'tesla', 'energyManager');
 	config::save('batt_target', 100, 'energyManager');
-	energyManager::ensureMainEquipment();
+	try {
+		energyManager::ensureMainEquipment();
+	} catch (Throwable $e) {
+		log::add('energyManager', 'error', 'Installation : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+	}
 }
 
 function energyManager_update() {
-	energyManager::ensureMainEquipment();
+	// Une erreur sur un équipement ne doit jamais faire échouer (et donc désactiver) le plugin : elle est journalisée.
+	try {
+		energyManager::ensureMainEquipment();
+	} catch (Throwable $e) {
+		log::add('energyManager', 'error', 'Mise à jour : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+	}
 	foreach (eqLogic::byType('energyManager') as $eq) {
-		$eq->save();
+		try {
+			$eq->save();
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Mise à jour de « ' . $eq->getName() . ' » : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+		}
 	}
 }
 

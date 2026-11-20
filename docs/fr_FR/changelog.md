@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Robustesse : une erreur lors de l'installation ou de la mise à jour d'un équipement, ou dans un cycle du démon, est journalisée (fichier et ligne) au lieu de faire échouer ou désactiver le plugin.
+
 ## 0.7.0
 
 - **Réserve de nuit apprise** : le plugin mesure la consommation de la maison de la tombée du jour au lever du soleil, garde les 14 dernières nuits et en déduit le SOC à laisser au soir (SOC mini + besoin de la nuit avec 15 % de marge, sur la capacité de la batterie). Mode **Auto** par défaut ; tant que 3 nuits n'ont pas été mesurées, la valeur par défaut est de 6 kWh.
