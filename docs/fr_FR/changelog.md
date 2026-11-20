@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Correctif : la page de configuration du plugin s'affichait vide (erreur de syntaxe PHP introduite en 0.4.0).
+
 ## 0.4.0
 
 - **Réserve de nuit** : une jauge (widget et simulateur) indique le SOC que la batterie doit encore avoir au soir, quand la production passe sous le talon de la maison. Le ballon ne passe avant la batterie que si le SOC projeté au soir reste au-dessus (avec la prévision solaire restante si elle est configurée, sinon avec le SOC actuel). Sinon il n'utilise que l'injection réelle ou l'heure creuse EDF, et il est coupé si la batterie se décharge pour lui.

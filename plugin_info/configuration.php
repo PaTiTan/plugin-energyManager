@@ -97,8 +97,8 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		<?php em_val_row('evening_hour', '{{Heure du « soir »}}', '19', '{{Heure à laquelle la production passe sous le talon de la maison.}}', 'h'); ?>
 		<?php em_val_row('talon', '{{Talon de la maison}}', '400', '{{Consommation de base, utilisée pour projeter le SOC du soir avec la prévision solaire.}}', 'W'); ?>
 		<?php em_val_row('batt_kwh', '{{Capacité de la batterie}}', '16', '', 'kWh'); ?>
-		<?php em_val_row('ecs_deadline', '{{Heure limite du ballon}}', '16', '{{Si le ballon n'a pas atteint la température de son thermostat à cette heure, il est mis sur OFF et une alerte Discord est envoyée.}}', 'h'); ?>
-		<?php em_val_row('ecs_absorb_temp', '{{Température au-delà de laquelle le ballon n'absorbe plus}}', '50', '{{Sert à décider de laisser la limite Hoymiles au maximum.}}', '°C'); ?>
+		<?php em_val_row('ecs_deadline', '{{Heure limite du ballon}}', '16', '{{Si le ballon n\'a pas atteint la température de son thermostat à cette heure, il est mis sur OFF et une alerte Discord est envoyée.}}', 'h'); ?>
+		<?php em_val_row('ecs_absorb_temp', '{{Température au-delà de laquelle le ballon n\'absorbe plus}}', '50', '{{Sert à décider de laisser la limite Hoymiles au maximum.}}', '°C'); ?>
 
 		<legend><i class="fas fa-solar-panel"></i> {{Mesures}}</legend>
 		<?php em_cmd_row('cmd_grid', '{{Puissance réseau (signée)}}', 'info', '{{Positif = soutirage EDF, négatif = injection.}}'); ?>
