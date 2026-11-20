@@ -190,7 +190,7 @@ function em_eq_val($key, $label, $default, $unit = '', $help = '') {
 								<?php em_eq_cmd('cmd_mode_info', '{{teslasmartcharge : info « Mode Actuel » (mode_actuel)}}', 'info', '{{teslasmartcharge change de mode seul (voiture débranchée, cible atteinte) : energyManager le lit ici.}}'); ?>
 								<?php em_eq_cmd('cmd_set_priority', '{{teslasmartcharge : commande « Définir Priorité » (set_priorite_charge)}}', 'action', '{{energyManager envoie voiture ou maison selon son sélecteur de priorité.}}'); ?>
 								<?php em_eq_cmd('tesla_cmd_power', '{{Puissance réelle de charge}}'); ?>
-								<?php em_eq_val('tesla_power_max', '{{Puissance maximale}}', '3680', 'W'); ?>
+								<?php em_eq_val('tesla_power_max', '{{Puissance maximale}}', '7200', 'W', '{{32 A x 230 V environ. La Tesla est considérée comme pleine au-delà de ce seuil moins 500 W.}}'); ?>
 							</div>
 
 							<div class="emType emType-clim">

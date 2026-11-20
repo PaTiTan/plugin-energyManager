@@ -269,7 +269,7 @@ class energyManager extends eqLogic {
 			if ($isTesla && ($theo === '' || $theo === null)) {
 				$theo = $eq->getConfiguration('power_theo');
 			}
-			$theo = (is_numeric($theo) && (float) $theo > 0) ? (float) $theo : ($isTesla ? 3680 : 1000);
+			$theo = (is_numeric($theo) && (float) $theo > 0) ? (float) $theo : ($isTesla ? 7200 : 1000);
 			$pr = self::readCmd($powerCmd);
 			$st = self::readCmd($eq->getConfiguration('cmd_state'));
 			$power = ($pr !== null && is_numeric($pr['value'])) ? (float) $pr['value'] : 0;

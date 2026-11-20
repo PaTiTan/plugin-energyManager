@@ -275,6 +275,26 @@ $r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 5000, 'grid' =
 	'equips' => array(ecs(array('water_temp' => 51, 'min_temp' => 55))), 'mem' => array('last_start' => 1000000))));
 check('ballon > 50 °C et injection critique : limite bridée', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] < 7600);
 
+// 29. Tesla : jamais bridée. En charge à 1500 W (plage 460 W à 7200 W), grosse injection : la limite Hoymiles reste au max
+$teslaEnCharge = array('id' => 93, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 1500, 'power_theo' => 7200, 'priority' => 1);
+$r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equips' => array($teslaEnCharge),
+	'mem' => array('inj_any_since' => 1000000 - 400, 'inj_since' => 1000000 - 100))));
+check('Tesla en charge avec de la place : Hoymiles jamais bridé', find_action($r, 'hoymiles') === null);
+
+// 29b. Tesla bloquée (injection critique depuis plus de 5 min) : on finit par brider pour ne pas injecter
+$r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equips' => array($teslaEnCharge),
+	'mem' => array('inj_any_since' => 1000000 - 900, 'inj_since' => 1000000 - 400))));
+check('Tesla bloquée > 5 min : limitation Hoymiles', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] < 7600);
+
+// 29c. Tesla en mode solaire mais pas encore démarrée : la batterie garde sa charge (teslasmartcharge compte la charge batterie dans son surplus)
+$teslaAttente = array_merge($teslaEnCharge, array('power_real' => 0));
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'batt' => 2000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaAttente))));
+check('Tesla pas encore démarrée : la charge batterie n\'est pas coupée', find_action($r, 'charge_limit') === null);
+
+// 29d. Tesla en charge (>= 460 W) et priorité Tesla : batterie à 0 W
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'batt' => 500, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaEnCharge))));
+check('Tesla en charge + priorité Tesla : charge batterie à 0 W', ($a = find_action($r, 'charge_limit')) !== null && $a['value'] == 0);
+
 // 25. Plages d'heures creuses (JSON du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');
 check('plages : 2 plages lues', count($slots) === 2);

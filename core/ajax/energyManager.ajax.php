@@ -61,7 +61,7 @@ try {
 					'temp' => 18, 'target' => 20, 'boost' => 2, 'window_open' => false, 'season_heat' => true)),
 				array_merge($base, array('id' => 9003, 'type' => 'simple', 'name' => 'Radiateur étage (démo)', 'power_theo' => 1500, 'priority' => 2,
 					'temp' => 18, 'target' => 20, 'boost' => 2, 'window_open' => false, 'season_heat' => true)),
-				array_merge($base, array('id' => 9004, 'type' => 'tesla', 'name' => 'Tesla (démo)', 'power_theo' => 7000, 'priority' => 3,
+				array_merge($base, array('id' => 9004, 'type' => 'tesla', 'name' => 'Tesla (démo)', 'power_theo' => 7200, 'priority' => 3,
 					'active' => false, 'tesla_mode' => 'Stand-By')),
 			);
 		}

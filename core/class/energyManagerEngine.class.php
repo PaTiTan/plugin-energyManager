@@ -50,6 +50,8 @@ class energyManagerEngine {
 		'tesla_priority'    => 'tesla', // 'tesla' ou 'battery'
 		'tesla_room_margin' => 500,   // W - la Tesla peut encore absorber si sa puissance est inférieure de plus que cette marge à son maximum
 		'tesla_grace'       => 120,   // s - délai laissé à la Tesla (confirmation 60 s + API) avant d'agir sans elle
+		'tesla_min_w'       => 460,   // W - plus petite charge de teslasmartcharge (2 A x 230 V) ; la plage va jusqu'à 32 A (~7 kW)
+		'tesla_patience'    => 300,   // s - injection critique durable malgré une Tesla en solaire : on la considère bloquée (API, réveil...)
 		'tesla_hold_max'    => 1500,  // W - au-delà de cette injection, on n'attend plus la Tesla
 		'ecs_pv_ok'         => 500,   // W - (réservé)
 		'night_reserve'     => 50,    // % - SOC à garder pour la nuit (jauge du widget)
@@ -120,10 +122,12 @@ class energyManagerEngine {
 		/* ---------- 2. Tesla en mode solaire : teslasmartcharge régule seul ---------- */
 		$teslaSolar = false;
 		$teslaRoom = false;
+		$teslaPower = 0.0;
 		foreach ($equips as $e) {
 			if ($e['type'] === 'tesla' && $e['mode'] === 'auto' && !empty($e['active'])) {
 				$teslaSolar = true;
 				$teslaRoom = ((float) $e['power_real'] < (float) $e['power_theo'] - $cfg['tesla_room_margin']);
+				$teslaPower = (float) $e['power_real'];
 			}
 		}
 		// Priorité Tesla : tant qu'elle peut absorber et qu'elle a eu le temps de réagir, les autres consommateurs
@@ -169,7 +173,10 @@ class energyManagerEngine {
 		/* ---------- 3. Limite de charge batterie ---------- */
 		$newCharge = $cfg['charge_max'];
 		$reasonCharge = 'charge libre';
-		if ($teslaSolar && $cfg['tesla_priority'] === 'tesla') {
+		// Priorité Tesla : batterie à 0 W SEULEMENT une fois la voiture réellement en charge. Tant qu'elle n'a pas démarré (surplus < 2 A,
+		// confirmation de 60 s, réveil...), la batterie garde la charge : teslasmartcharge compte la puissance de charge de la batterie
+		// dans son surplus, donc il démarre quand même, et rien n'est injecté ni perdu.
+		if ($teslaSolar && $cfg['tesla_priority'] === 'tesla' && $teslaPower >= $cfg['tesla_min_w']) {
 			$newCharge = 0;
 			$reasonCharge = 'priorité Tesla : batterie à 0 W de charge';
 		} elseif ($soc >= $cfg['batt_target']) {
@@ -286,7 +293,10 @@ class energyManagerEngine {
 		$critical = $injection >= $cfg['inj_critical'];
 		// Quelque chose peut-il absorber de la production ? (Tesla branchée en mode solaire avec de la place, consommateur qui démarre ou
 		// démarrerait avec la production non bridée, batterie qui peut encore charger.) Sinon, et seulement sinon, on bride.
-		$teslaCan = $teslaSolar && $teslaRoom && !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
+		// La Tesla en mode solaire avec de la place n'est JAMAIS bridée par la limite Hoymiles : elle monte seule de 460 W à ~7 kW.
+		// Seule exception : injection critique qui dure malgré tout (Tesla bloquée) ou maximum légal atteint.
+		$teslaStuck = ($mem['inj_since'] > 0 && ($now - $mem['inj_since']) >= $cfg['tesla_patience']) || $injection >= $cfg['inj_legal'];
+		$teslaCan = $teslaSolar && $teslaRoom && !$teslaStuck;
 		$loadCan = $started || $absorbPending || $teslaCan;
 		$battLimit = min($newCharge, $cfg['charge_max']);
 		$battRoom = ($battLimit >= 100) && ($soc < 98) && (($battLimit - $battCharge) >= max(500, (float) $mem['hoy_hidden'] + 100));

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- **La Tesla n'est jamais bridée** : tant qu'elle est en mode Solaire avec de la place (plage de 2 A / 460 W à 32 A / ~7 kW), la limite Hoymiles reste au maximum, même avec une forte injection. Exception : injection critique qui dure plus de 5 minutes malgré tout (Tesla bloquée) ou maximum légal atteint.
+- Priorité Tesla : la batterie n'est mise à 0 W de charge qu'une fois la voiture réellement en charge (≥ 460 W). Avant, teslasmartcharge compte la charge de la batterie dans son surplus et démarre normalement ; plus d'injection perdue pendant la montée en puissance.
+- Puissance maximale de la Tesla : 7200 W par défaut.
+- Simulateur : la Tesla reproduit teslasmartcharge (surplus = batterie - réseau + voiture, paliers de 230 W, confirmation 60 s, coupure immédiate si la maison se vide, seuil batterie en priorité « maison »).
+
 ## 0.4.1
 
 - Correctif : la page de configuration du plugin s'affichait vide (erreur de syntaxe PHP introduite en 0.4.0).

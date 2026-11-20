@@ -11,8 +11,9 @@
   var THERMO = 60         // °C : thermostat du ballon
   var WATER_L = 200       // litres
   var TESLA_MIN = 460     // W : 2 A mini
-  var TESLA_MAX = 7360    // W : 32 A mono
+  var TESLA_MAX = 7360    // W : 32 A x 230 V
   var TESLA_PERIOD = 60   // s : confirmation de teslasmartcharge
+  var TESLA_SEUIL = 80    // % : seuil batterie de teslasmartcharge en priorité « maison » (réglage du plugin Tesla)
   var CYCLE = 10          // s : cadence de décision
 
   var S = null            // état simulé
@@ -155,17 +156,25 @@
       }
     })
 
-    // Tesla : modèle simplifié de teslasmartcharge (confirmation 60 s, marge, 2 à 32 A)
+    // Tesla : reproduit teslasmartcharge (mode Solaire). Surplus = puissance batterie (charge +) - réseau (soutirage +) + puissance déjà prise
+    // par la voiture ; paliers de 230 W (2 à 32 A) ; un changement doit être confirmé 60 s dans le même sens ; coupure immédiate si la
+    // maison se vide (batterie < -50 W) ; en priorité « maison », la voiture attend que la batterie dépasse son seuil.
     byType('tesla').forEach(function (e) {
       e.active = (e.tesla_mode === 'Solaire')
       e.mode = (e.tesla_mode === 'Non actif') ? 'off' : 'auto'
-      if (!e.active) { e.power_real = 0; e._t = 0 } else {
-        e._t = (e._t || 0) + dt
-        if (e._t >= TESLA_PERIOD) {
-          e._t = 0
-          var avail = e.power_real - S.grid - cfg.tesla_margin    // injection libre + ce que la voiture prend déjà
-          var cap = Math.min(TESLA_MAX, e.power_theo || TESLA_MAX)
-          e.power_real = avail < TESLA_MIN ? 0 : Math.min(avail, cap)
+      if (!e.active) { e.power_real = 0; e._t = 0; e._dir = 0 } else {
+        var allow = S.batt - S.grid + e.power_real
+        var amps = Math.min(32, Math.floor(allow / 230))
+        if (amps < 2) { amps = 0 }
+        var target = Math.min(amps * 230, e.power_theo || TESLA_MAX)
+        if (S.prio === 'battery' && S.soc < TESLA_SEUIL) { target = 0 }
+        if (S.batt < -50 && target < e.power_real) { e.power_real = target; e._t = 0; e._dir = 0 }   // urgence : la maison se vide
+        else if (target === e.power_real) { e._t = 0; e._dir = 0 }
+        else {
+          var dir = target > e.power_real ? 1 : -1
+          if (dir !== e._dir) { e._dir = dir; e._t = 0 }
+          e._t += dt
+          if (e._t >= TESLA_PERIOD) { e.power_real = target; e._t = 0; e._dir = 0 }
         }
       }
       e.is_on = e.power_real > 20
