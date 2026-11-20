@@ -169,15 +169,19 @@
       e.active = (e.tesla_mode === 'Solaire')
       e.mode = (e.tesla_mode === 'Non actif') ? 'off' : 'auto'
       if (!e.active) { e.power_real = 0; e._t = 0; e._dir = 0 } else {
-        var allow = S.batt - S.grid + e.power_real - (e.margin || 0)     // marge de teslasmartcharge : négative = soutirage EDF toléré
+        // priorité « maison » sous le seuil de SOC : la batterie passe d'abord (sa charge n'est pas offerte à la voiture), mais la voiture
+        // n'attend jamais : elle prend tout ce que la batterie n'absorbe pas (l'injection) dès qu'il y a 2 A
+        var battFirst = (S.prio === 'battery' && S.soc < TESLA_SEUIL)
+        var apport = battFirst ? 0 : S.batt
+        var allow = apport - S.grid + e.power_real - (e.margin || 0)     // marge de teslasmartcharge : négative = soutirage EDF toléré
         var amps = Math.min(32, Math.floor(allow / 230))
         if (amps < 2) { amps = 0 }
         var cap = e.power_theo || TESLA_MAX
         var target = Math.min(amps * 230, cap)
-        var why = 'surplus ' + Math.round(allow) + ' W (batterie ' + Math.round(S.batt) + ' − réseau ' + Math.round(S.grid) + ' + voiture ' + Math.round(e.power_real) + ')'
+        var why = (battFirst ? 'priorité maison (SOC ' + Math.round(S.soc) + ' % < ' + TESLA_SEUIL + ' %) : la batterie d\'abord, la voiture prend l\'injection · ' : '')
+          + 'surplus ' + Math.round(allow) + ' W (batterie ' + Math.round(apport) + ' − réseau ' + Math.round(S.grid) + ' + voiture ' + Math.round(e.power_real) + ')'
         if (amps === 0) { why += ' < ' + TESLA_MIN + ' W (2 A mini) : pas de charge' }
         else { why += ' → ' + amps + ' A' + (amps * 230 > cap ? ' (plafonné à la puissance maximale ' + Math.round(cap) + ' W)' : '') }
-        if (S.prio === 'battery' && S.soc < TESLA_SEUIL) { target = 0; why = 'priorité maison : la voiture attend que le SOC (' + Math.round(S.soc) + ' %) dépasse ' + TESLA_SEUIL + ' %' }
         if (S.batt < -50 && target < e.power_real) { e.power_real = target; e._t = 0; e._dir = 0; why += ' · coupure immédiate (la maison se vide)' }
         else if (target === e.power_real) { e._t = 0; e._dir = 0; why += ' · stable' }
         else {

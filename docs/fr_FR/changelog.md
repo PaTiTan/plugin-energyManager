@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- **La Tesla n'attend plus jamais un niveau de batterie.** En priorité Batterie (teslasmartcharge « maison »), la batterie passe d'abord mais la voiture prend tout ce que la batterie n'absorbe pas (l'injection) et charge dès 2 A (460 W). Le simulateur reproduit cette règle. Nécessite teslasmartcharge 1.3.0-beta.
+
 ## 0.8.0
 
 - **Extinction propre d'un équipement que l'on cesse de piloter** (voyant rouge ou commande « Piloté OFF ») : radiateurs et ballon sont mis à OFF ; la Tesla passe en Stand-By (ce qui arrête la charge en cours) puis en « Non actif » (teslasmartcharge ne fait plus rien : sans l'étape Stand-By, la charge en cours aurait continué). Même principe prévu pour la climatisation. Rien n'est envoyé en mode simulation. Quand la Tesla redevient pilotée, elle repasse en Stand-By et energyManager la remet en Solaire au branchement.
