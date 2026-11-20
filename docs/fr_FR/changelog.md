@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- **Retour à l'état sûr** : au passage de l'interrupteur de pilotage au rouge, les limites que le plugin avait réduites (micro-onduleurs Hoymiles, onduleur Victron, charge de la batterie) reviennent une fois à leur valeur maximale. Rien n'est envoyé en mode simulation.
+
 ## 0.6.1
 
 - **Onduleur Victron à 0 W pendant que la Tesla charge** : la batterie maison ne décharge pas pour la Tesla ; la limite onduleur revient à son maximum quand la Tesla ne charge plus (arrêtée ou débranchée), après 30 s. Nécessite l'ordre et le retour « puissance onduleur » dans la configuration Victron. Affichée dans le widget et le simulateur.

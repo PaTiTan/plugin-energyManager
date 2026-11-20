@@ -184,9 +184,15 @@ class energyManager extends eqLogic {
 			$result = array('actions' => array(), 'alerts' => array(), 'mem' => array(),
 				'info' => array('decision' => 'Pilotage désactivé (interrupteur rouge)'));
 			cache::set('energyManager::mem', '{}');
+			if (!$simulation) {
+				self::safeState($state, $now);
+			}
 			self::mirror($state, $result, $slot, $simulation);
 			self::handleAlerts(array(), $now);
 			return $result;
+		}
+		if ((int) cache::byKey('energyManager::safe_done')->getValue(0) === 1) {
+			cache::set('energyManager::safe_done', 0); // pilotage réactivé : le prochain passage au rouge refera le retour à l'état sûr
 		}
 
 		$result = energyManagerEngine::decide($state);
@@ -235,6 +241,30 @@ class energyManager extends eqLogic {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * Retour à l'état sûr au passage de l'interrupteur au rouge (une seule fois) : les limites que le plugin a pu réduire
+	 * (micro-onduleurs Hoymiles, onduleur Victron, charge de la batterie) reviennent à leur valeur maximale.
+	 */
+	private static function safeState(array $_state, $_now) {
+		if ((int) cache::byKey('energyManager::safe_done')->getValue(0) === 1) {
+			return;
+		}
+		cache::set('energyManager::safe_done', 1);
+		$cfg = $_state['cfg'];
+		$todo = array(
+			array('type' => 'hoymiles', 'value' => $cfg['hoy_max'], 'cur' => $_state['hoy_limit']),
+			array('type' => 'inv_limit', 'value' => $cfg['inv_max'], 'cur' => $_state['inv_limit']),
+			array('type' => 'charge_limit', 'value' => $cfg['charge_max'], 'cur' => $_state['charge_limit']),
+		);
+		foreach ($todo as $a) {
+			if ((float) $a['cur'] < (float) $a['value'] - 5) {
+				$a['reason'] = 'pilotage désactivé : limite remise à sa valeur maximale';
+				log::add('energyManager', 'info', self::describeAction($a));
+				self::applyAction($a, $_now);
+			}
+		}
 	}
 
 	/** Paramètres du moteur : valeurs du plugin + sélecteurs du widget. */

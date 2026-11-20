@@ -217,9 +217,16 @@
   function decide() {
     if (!S.active) {
       S.decision = 'Pilotage désactivé (interrupteur rouge) : rien n\'est décidé ni commandé'
+      if (!S.safeDone) {
+        S.safeDone = true
+        ;[['hoy', 'Hoymiles', 'hoy_max'], ['inv', 'onduleur Victron', 'inv_max'], ['chg', 'charge batterie', 'charge_max']].forEach(function (l) {
+          if (S[l[0]] < num(S.cfg[l[2]]) - 5) { S[l[0]] = num(S.cfg[l[2]]); log('act', 'Limite ' + l[1] + ' → ' + S[l[0]] + ' W : pilotage désactivé : limite remise à sa valeur maximale') }
+        })
+      }
       S.decisionAlert = false
       return
     }
+    S.safeDone = false
     inflight = true
     var state = {
       now: Math.floor(S.t), minute: minuteOf(S.t), grid: S.grid, pv: S.pv, soc: S.soc, batt: S.batt, house: S.house,
