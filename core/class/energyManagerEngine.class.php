@@ -1,0 +1,353 @@
+<?php
+/* This file is part of Jeedom.
+ *
+ * Jeedom is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Jeedom is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Jeedom. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/**
+ * Moteur de décision d'Energy Manager.
+ *
+ * Classe PURE : aucune dépendance à Jeedom, aucune entrée/sortie.
+ * Elle reçoit une photo de l'installation (mesures, configuration, équipements,
+ * mémoire du cycle précédent) et renvoie des décisions (actions, alertes, infos,
+ * nouvelle mémoire). C'est ce qui permet le mode simulation et les tests.
+ *
+ * Conventions de signe :
+ *   grid  > 0 : soutirage EDF      grid < 0 : injection vers EDF
+ *   batt  > 0 : charge batterie    batt < 0 : décharge batterie
+ */
+class energyManagerEngine {
+
+	const DEFAULTS = array(
+		'soc_min'           => 10,    // % - plancher batterie
+		'batt_target'       => 100,   // % - 95 ou 100 (95 = on garde de la place pour encaisser un surplus)
+		'charge_max'        => 3680,  // W - limite de charge batterie du Victron
+		'inv_max'           => 4000,  // W - limite onduleur du Victron
+		'hoy_max'           => 7600,  // W - limite maximale des micro-onduleurs
+		'hoy_step_up'       => 200,   // W - pas de remontée de la limite Hoymiles
+		'hoy_min_delta'     => 50,    // W - écart minimal pour écrire la limite Hoymiles (flash)
+		'hoy_write_interval'=> 60,    // s - délai mini entre 2 écritures Hoymiles (hors injection critique)
+		'inj_critical'      => 500,   // W - injection considérée critique
+		'inj_legal'         => 3000,  // W - maximum légal (jamais atteint si tout va bien)
+		'inj_critical_hold' => 20,    // s - durée d'injection critique avant alerte
+		'imp_off'           => 150,   // W - soutirage au-delà duquel on délestre
+		'imp_hold'          => 30,    // s - durée de soutirage avant délestage
+		'start_ratio'       => 0.7,   // part de la puissance théorique qui doit être disponible pour démarrer
+		'settle'            => 30,    // s - attente après un démarrage avant le suivant
+		'min_pv'            => 300,   // W - en dessous, on considère qu'il n'y a pas de soleil
+		'tesla_margin'      => 300,   // W - marge laissée à teslasmartcharge en mode solaire
+		'tesla_priority'    => 'tesla', // 'tesla' ou 'battery'
+		'ecs_pv_ok'         => 500,   // W - production à laquelle on estime que le ballon sera chauffé par le soleil
+	);
+
+	/**
+	 * @param array $s photo de l'installation :
+	 *   now (timestamp), minute (minute du jour 0-1439), grid, pv, soc, batt, house,
+	 *   stale (liste de clés de mesures périmées), cfg (surcharges de DEFAULTS),
+	 *   hoy_limit (limite actuelle), charge_limit (limite actuelle),
+	 *   hc (bool, heure creuse en cours), equips (liste), mem (mémoire précédente)
+	 * @return array actions, alerts, info, mem
+	 */
+	public static function decide(array $s) {
+		$cfg = array_merge(self::DEFAULTS, isset($s['cfg']) ? $s['cfg'] : array());
+		$mem = array_merge(array(
+			'inj_since' => 0, 'imp_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0,
+		), isset($s['mem']) ? $s['mem'] : array());
+		$out = array('actions' => array(), 'alerts' => array(), 'info' => array(), 'mem' => $mem);
+		$now = (int) $s['now'];
+
+		/* ---------- 1. Cohérence des données : sinon on ne pilote rien ---------- */
+		$stale = isset($s['stale']) ? $s['stale'] : array();
+		if (count($stale) > 0) {
+			$out['alerts'][] = array('key' => 'stale', 'level' => 'critical',
+				'message' => 'Donnée obsolète ou absente : ' . implode(', ', $stale) . '. Aucun pilotage.');
+			$out['info']['decision'] = 'Sécurité : données obsolètes, aucun pilotage';
+			return $out;
+		}
+		foreach (array('grid', 'pv', 'soc') as $k) {
+			if (!isset($s[$k]) || !is_numeric($s[$k])) {
+				$out['alerts'][] = array('key' => 'incoherent', 'level' => 'critical',
+					'message' => 'Donnée incohérente (' . $k . ' absente). Aucun pilotage.');
+				$out['info']['decision'] = 'Sécurité : donnée absente (' . $k . ')';
+				return $out;
+			}
+		}
+		if ($s['soc'] < 0 || $s['soc'] > 100 || $s['pv'] < -50 || $s['pv'] > $cfg['hoy_max'] * 1.3) {
+			$out['alerts'][] = array('key' => 'incoherent', 'level' => 'critical',
+				'message' => 'Donnée incohérente : SOC=' . $s['soc'] . '% PV=' . $s['pv'] . 'W. Aucun pilotage.');
+			$out['info']['decision'] = 'Sécurité : données incohérentes';
+			return $out;
+		}
+
+		$grid = (float) $s['grid'];
+		$pv = max(0, (float) $s['pv']);
+		$soc = (float) $s['soc'];
+		$injection = max(0, -$grid);
+		$import = max(0, $grid);
+		$daytime = $pv >= $cfg['min_pv'];
+		$hoyLimit = isset($s['hoy_limit']) ? (float) $s['hoy_limit'] : (float) $cfg['hoy_max'];
+		$chargeLimit = isset($s['charge_limit']) ? (float) $s['charge_limit'] : (float) $cfg['charge_max'];
+
+		// durées d'état
+		$mem['inj_since'] = ($injection >= $cfg['inj_critical']) ? ($mem['inj_since'] ?: $now) : 0;
+		$mem['imp_since'] = ($import >= $cfg['imp_off']) ? ($mem['imp_since'] ?: $now) : 0;
+
+		$equips = isset($s['equips']) ? $s['equips'] : array();
+
+		/* ---------- 2. Tesla en mode solaire : teslasmartcharge régule seul ---------- */
+		$teslaSolar = false;
+		foreach ($equips as $e) {
+			if ($e['type'] === 'tesla' && $e['mode'] === 'auto' && !empty($e['active'])) {
+				$teslaSolar = true;
+			}
+		}
+
+		/* ---------- 3. Limite de charge batterie ---------- */
+		$newCharge = $cfg['charge_max'];
+		$reasonCharge = 'charge libre';
+		if ($teslaSolar && $cfg['tesla_priority'] === 'tesla') {
+			$newCharge = 0;
+			$reasonCharge = 'priorité Tesla : batterie à 0 W de charge';
+		} elseif ($soc >= $cfg['batt_target']) {
+			// batterie "pleine" selon le sélecteur (95 % ou 100 %)
+			$newCharge = 0;
+			$reasonCharge = 'batterie à ' . $cfg['batt_target'] . ' %, charge stoppée';
+			// tampon : si un surplus critique arrive et qu'il reste de la place, on l'utilise le temps que les consommateurs réagissent
+			if ($injection >= $cfg['inj_critical'] && $soc < 100) {
+				$newCharge = $cfg['charge_max'];
+				$reasonCharge = 'tampon batterie utilisé pour absorber un surplus critique';
+			}
+		}
+		if (abs($newCharge - $chargeLimit) >= 5) {
+			$out['actions'][] = array('type' => 'charge_limit', 'value' => $newCharge, 'reason' => $reasonCharge);
+		}
+
+		/* ---------- 4. Consommateurs ---------- */
+		$started = false;
+		$wantsPending = false;   // un consommateur voudrait démarrer mais attend
+		$cands = array();
+		foreach ($equips as $e) {
+			if ($e['type'] === 'tesla' || $e['type'] === 'clim') {
+				continue; // piloté par son propre plugin / mis en stand-by
+			}
+			$w = self::wants($e, $cfg, $s, $daytime, $pv);
+			$e['_want'] = $w['want'];
+			$e['_source'] = $w['source'];
+			$e['_why'] = $w['why'];
+			$e['_sort'] = ($e['type'] === 'ecs' ? 0 : (int) $e['priority']) * 100000 + (int) $e['id'];
+			$cands[] = $e;
+		}
+		usort($cands, function ($a, $b) { return $a['_sort'] - $b['_sort']; });
+
+		// 4a. extinctions simples : le besoin a disparu (résistances : pas d'hystérésis)
+		foreach ($cands as $e) {
+			// option ballon : ne pas couper quand le thermostat a atteint sa température
+			$keepOn = ($e['type'] === 'ecs' && !empty($e['done_today']) && isset($e['cut_on_zero']) && !$e['cut_on_zero']);
+			if ($e['is_on'] && !$e['_want'] && $e['mode'] !== 'on' && !$keepOn) {
+				$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'off', 'reason' => $e['_why']);
+				$e['is_on'] = false;
+			}
+		}
+
+		// 4b. délestage : soutirage durable, ou plus de soleil, on coupe le moins prioritaire alimenté en solaire
+		$shedding = $mem['imp_since'] > 0 && ($now - $mem['imp_since']) >= $cfg['imp_hold'] && !$teslaSolar;
+		if ($shedding || !$daytime) {
+			$rev = array_reverse($cands);
+			foreach ($rev as $e) {
+				if ($e['is_on'] && $e['mode'] === 'auto' && $e['_source'] === 'solar'
+					&& !self::alreadyOff($out['actions'], $e['id'])) {
+					$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'off',
+						'reason' => $daytime ? 'soutirage EDF de ' . round($import) . ' W : délestage' : 'plus de production solaire');
+					if ($daytime) {
+						break; // un seul par cycle quand c'est du délestage
+					}
+				}
+			}
+		}
+
+		// 4c. démarrage : forcés et besoins EDF autorisés d'abord, puis surplus solaire
+		foreach ($cands as $e) {
+			if ($e['is_on'] || !$e['_want'] || self::alreadyOff($out['actions'], $e['id'])) {
+				continue;
+			}
+			if ($e['mode'] === 'on' || $e['_source'] === 'edf') {
+				$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'on', 'reason' => $e['_why']);
+				continue;
+			}
+			// solaire : un seul démarrage par cycle, et seulement si le surplus le justifie
+			if ($started) {
+				$wantsPending = true;
+				continue;
+			}
+			$need = $e['power_theo'] * $cfg['start_ratio'] + ($teslaSolar ? $cfg['tesla_margin'] : 0);
+			$settled = ($now - $mem['last_start']) >= $cfg['settle'];
+			if ($injection >= $need && $settled) {
+				$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'on',
+					'reason' => 'surplus ' . round($injection) . ' W ≥ ' . round($need) . ' W : ' . $e['_why']);
+				$mem['last_start'] = $now;
+				$started = true;
+			} else {
+				$wantsPending = true;
+			}
+		}
+
+		/* ---------- 5. Limitation Hoymiles : dernier recours ---------- */
+		$newHoy = $hoyLimit;
+		$reasonHoy = '';
+		$critical = $injection >= $cfg['inj_critical'];
+		if ($critical && !$started) {
+			// aucun consommateur ne peut absorber : on bride la production pour ne pas injecter
+			$newHoy = max(0, min($hoyLimit, $pv) - $injection + 50);
+			$reasonHoy = 'injection ' . round($injection) . ' W non absorbable : limitation à ' . round($newHoy) . ' W';
+		} elseif ($hoyLimit < $cfg['hoy_max']) {
+			if (!$daytime) {
+				$newHoy = $cfg['hoy_max'];
+				$reasonHoy = 'plus de soleil : limite remise au maximum';
+			} elseif ($import > 0) {
+				$newHoy = min($cfg['hoy_max'], $hoyLimit + max($cfg['hoy_step_up'], $import));
+				$reasonHoy = 'soutirage EDF : on relève la limite';
+			} elseif ($injection < 100 && $pv >= 0.9 * $hoyLimit) {
+				$newHoy = min($cfg['hoy_max'], $hoyLimit + $cfg['hoy_step_up']);
+				$reasonHoy = 'limite atteinte sans injection : on relève la limite';
+			}
+		}
+		$newHoy = max(0, min($cfg['hoy_max'], $newHoy));
+		$delta = abs($newHoy - $hoyLimit);
+		$intervalOk = ($now - $mem['last_hoy_write']) >= $cfg['hoy_write_interval'];
+		$isReduction = $newHoy < $hoyLimit;
+		if ($reasonHoy !== '' && $delta >= $cfg['hoy_min_delta'] && ($intervalOk || ($critical && $isReduction))) {
+			$out['actions'][] = array('type' => 'hoymiles', 'value' => round($newHoy), 'reason' => $reasonHoy);
+			$mem['last_hoy_write'] = $now;
+		}
+
+		/* ---------- 6. Alertes ---------- */
+		if ($mem['inj_since'] > 0 && ($now - $mem['inj_since']) >= $cfg['inj_critical_hold']) {
+			$out['alerts'][] = array('key' => 'injection', 'level' => 'critical',
+				'message' => 'Injection critique : ' . round($injection) . ' W depuis ' . ($now - $mem['inj_since']) . ' s.');
+		}
+		if ($injection >= $cfg['inj_legal']) {
+			$out['alerts'][] = array('key' => 'injection_legal', 'level' => 'critical',
+				'message' => 'Injection ' . round($injection) . ' W : maximum légal (' . $cfg['inj_legal'] . ' W) atteint !');
+		}
+
+		/* ---------- 7. Informations de synthèse ---------- */
+		$out['info'] = array(
+			'injection' => round($injection),
+			'import'    => round($import),
+			'daytime'   => $daytime ? 1 : 0,
+			'tesla_solar' => $teslaSolar ? 1 : 0,
+			'wants_pending' => $wantsPending ? 1 : 0,
+			'decision'  => count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)',
+		);
+		$out['mem'] = $mem;
+		return $out;
+	}
+
+	/**
+	 * Un équipement a-t-il besoin d'énergie, et de quelle source ?
+	 * @return array want (bool), source ('solar'|'edf'|'forced'), why (texte)
+	 */
+	public static function wants(array $e, array $cfg, array $s, $daytime, $pv) {
+		$no = function ($why) { return array('want' => false, 'source' => 'solar', 'why' => $why); };
+		if ($e['mode'] === 'off') {
+			return $no('équipement inactif (forcé OFF)');
+		}
+		if ($e['mode'] === 'on') {
+			return array('want' => true, 'source' => 'forced', 'why' => 'forcé ON par l\'utilisateur');
+		}
+
+		if ($e['type'] === 'ecs') {
+			if (!empty($e['done_today'])) {
+				return $no('ballon chaud pour la journée (thermostat atteint)');
+			}
+			// besoin EDF validé par l'utilisateur (réponse Discord) ou chauffe en HC de l'après-midi
+			if (!empty($e['force_edf'])) {
+				return array('want' => true, 'source' => 'edf', 'why' => 'complément EDF validé par l\'utilisateur');
+			}
+			$water = isset($e['water_temp']) ? $e['water_temp'] : null;
+			$minT = isset($e['min_temp']) ? $e['min_temp'] : 52;
+			$cold = ($water === null) || ($water < $minT);
+			$poorSun = $pv < $cfg['ecs_pv_ok'];
+			if (!empty($s['hc_afternoon']) && $cold && ($poorSun || !empty($e['forecast_poor']))) {
+				return array('want' => true, 'source' => 'edf', 'why' => 'heure creuse de l\'après-midi, soleil insuffisant, eau à ' . ($water === null ? '?' : $water) . ' °C');
+			}
+			if ($daytime) {
+				return array('want' => true, 'source' => 'solar', 'why' => 'ballon : puits d\'énergie solaire');
+			}
+			return $no('ballon : pas de soleil ni d\'heure creuse d\'après-midi');
+		}
+
+		// consommateur simple (radiateur) : chauffer seulement en journée, avec le soleil
+		if (!$daytime) {
+			return $no('pas de soleil');
+		}
+		if (empty($e['season_heat'])) {
+			return $no('saison : pas de chauffage');
+		}
+		if (!empty($e['window_open'])) {
+			return $no('fenêtre ouverte');
+		}
+		if (!isset($e['temp']) || $e['temp'] === null) {
+			return $no('température de pièce inconnue');
+		}
+		$limit = $e['target'] + (isset($e['boost']) ? $e['boost'] : 0);
+		if ($e['temp'] < $limit) {
+			return array('want' => true, 'source' => 'solar',
+				'why' => 'pièce à ' . $e['temp'] . ' °C < ' . $limit . ' °C (consigne ' . $e['target'] . ' + boost solaire)');
+		}
+		return $no('pièce à ' . $e['temp'] . ' °C ≥ ' . $limit . ' °C');
+	}
+
+	private static function alreadyOff(array $actions, $id) {
+		foreach ($actions as $a) {
+			if ($a['type'] === 'equip' && $a['id'] == $id && $a['cmd'] === 'off') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static function summarize(array $actions) {
+		$t = array();
+		foreach ($actions as $a) {
+			$t[] = $a['reason'];
+		}
+		return implode(' | ', $t);
+	}
+
+	/** Détecte un créneau HC/HP. $slots : liste de array(debutMin, finMin, 'HC'|'HP'). */
+	public static function slotAt(array $slots, $minute) {
+		foreach ($slots as $sl) {
+			if ($sl[0] <= $sl[1]) {
+				if ($minute >= $sl[0] && $minute < $sl[1]) {
+					return $sl[2];
+				}
+			} elseif ($minute >= $sl[0] || $minute < $sl[1]) { // créneau à cheval sur minuit
+				return $sl[2];
+			}
+		}
+		return 'HP';
+	}
+
+	/** Parse "HH:MM-HH:MM HC" (une ligne par créneau) en liste de créneaux. */
+	public static function parseSlots($text) {
+		$slots = array();
+		foreach (preg_split('/\R/', (string) $text) as $line) {
+			if (preg_match('/^\s*(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})\s+(HC|HP)\s*$/i', $line, $m)) {
+				$slots[] = array($m[1] * 60 + $m[2], $m[3] * 60 + $m[4], strtoupper($m[5]));
+			}
+		}
+		return $slots;
+	}
+}

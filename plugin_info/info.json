@@ -1,0 +1,24 @@
+{
+  "id": "energyManager",
+  "name": "Energy Manager",
+  "description": {
+    "fr_FR": "Gestionnaire d'énergie prédictif : Victron MultiPlus-II, micro-onduleurs Hoymiles (AhoyDTU), consommateurs (ballon, radiateurs, clim, Tesla). Autoconsommation maximale, zéro injection, widget powerFlow."
+  },
+  "licence": "AGPL",
+  "author": "patitan",
+  "require": "4.4",
+  "category": "energy",
+  "version": "0.1.0",
+  "changelog": "https://github.com/PaTiTan/plugin-energyManager/blob/main/docs/fr_FR/changelog.md",
+  "documentation": "https://github.com/PaTiTan/plugin-energyManager/blob/main/docs/fr_FR/index.md",
+  "specialAttributes": {
+    "object": true,
+    "battery": false
+  },
+  "compatibility": {
+    "hardware": ["all"]
+  },
+  "hasDependency": false,
+  "hasOwnDeamon": true,
+  "maxDependancyInstallTime": 0
+}

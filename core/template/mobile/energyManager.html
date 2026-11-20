@@ -1,0 +1,117 @@
+<div class="eqLogic eqLogic-widget allowResize #custom_layout# #eqLogic_class#" data-eqType="#eqType#" data-eqLogic_id="#id#" data-eqLogic_uid="#uid#" data-version="#version#" data-translate-category="#translate_category#" data-category="#category#" data-tags="#tags#" style="width:#width#;height:#height#;#style#">
+	<style>
+		.emw-#uid# { background:#14202b; color:#cfe3ee; border-radius:8px; padding:8px; font-family:inherit; min-width:340px }
+		.emw-#uid# svg { width:100%; height:auto; display:block }
+		.emw-#uid# .node rect { fill:#1b2a38; stroke:#3b556b; stroke-width:2; rx:8 }
+		.emw-#uid# .node text { fill:#e8f3fa; font-size:15px; text-anchor:middle }
+		.emw-#uid# .node .lbl { fill:#8fb0c4; font-size:11px }
+		.emw-#uid# .pv rect { stroke:#f5a623 } .emw-#uid# .pv text.val { fill:#f5a623 }
+		.emw-#uid# .grid rect { stroke:#4a90d9 } .emw-#uid# .grid text.val { fill:#4a90d9 }
+		.emw-#uid# .bat rect { stroke:#3ecf63 } .emw-#uid# .bat text.val { fill:#3ecf63 }
+		.emw-#uid# .house rect { stroke:#4ec9b0 } .emw-#uid# .house text.val { fill:#4ec9b0 }
+		.emw-#uid# .wire { fill:none; stroke:#3b556b; stroke-width:3 }
+		.emw-#uid# .flow { fill:none; stroke-width:4; stroke-dasharray:6 10; opacity:0; }
+		.emw-#uid# .flow.on { opacity:1; animation:emflow-#uid# 1s linear infinite }
+		.emw-#uid# .flow.rev { animation-direction:reverse }
+		@keyframes emflow-#uid# { to { stroke-dashoffset:-16 } }
+		.emw-#uid# .cons { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px }
+		.emw-#uid# .tile { flex:1 1 90px; background:#1b2a38; border:2px solid #3b556b; border-radius:8px; padding:4px 6px; text-align:center; font-size:12px }
+		.emw-#uid# .tile.on { border-color:#4ec9b0 }
+		.emw-#uid# .tile b { display:block; font-size:15px }
+		.emw-#uid# .ctl { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center; font-size:12px }
+		.emw-#uid# .ctl .btn { padding:2px 8px }
+		.emw-#uid# .ctl .btn.active { background:#4ec9b0; color:#0b1620; border-color:#4ec9b0 }
+		.emw-#uid# .dec { margin-top:6px; font-size:11px; color:#8fb0c4 }
+		.emw-#uid# .sim { display:none; background:#d9534f; color:#fff; border-radius:4px; padding:1px 8px; font-size:11px; margin-left:6px }
+	</style>
+	<center class="widget-name">
+		<a href="#eqLink#" class="reportModeHidden">#name_display# <span class="object_name">#object_name#</span></a>
+		<span class="sim" id="sim-#uid#">SIMULATION</span>
+	</center>
+	<div class="emw-#uid#">
+		<svg viewBox="0 0 560 250" xmlns="http://www.w3.org/2000/svg">
+			<!-- fils -->
+			<path class="wire" d="M120 45 H280 V105"/>
+			<path class="wire" d="M120 125 H210"/>
+			<path class="wire" d="M280 145 V195 H210"/>
+			<path class="wire" d="M350 125 H440"/>
+			<!-- flux animés -->
+			<path class="flow" id="fpv-#uid#" stroke="#f5a623" d="M120 45 H280 V105"/>
+			<path class="flow" id="fgrid-#uid#" stroke="#4a90d9" d="M120 125 H210"/>
+			<path class="flow" id="fbat-#uid#" stroke="#3ecf63" d="M280 145 V195 H210"/>
+			<path class="flow" id="fhouse-#uid#" stroke="#4ec9b0" d="M350 125 H440"/>
+			<!-- noeuds -->
+			<g class="node pv" transform="translate(10,15)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">☀ SOLAIRE</text><text class="val" id="pv-#uid#" x="55" y="45">-- W</text></g>
+			<g class="node grid" transform="translate(10,95)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">⚡ RÉSEAU EDF</text><text class="val" id="grid-#uid#" x="55" y="45">-- W</text></g>
+			<g class="node" transform="translate(210,105)"><rect width="140" height="40"/><text class="lbl" x="70" y="16">MULTIPLUS II</text><text id="inj-#uid#" x="70" y="33" style="font-size:12px">injection 0 W</text></g>
+			<g class="node house" transform="translate(440,95)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">🏠 MAISON</text><text class="val" id="house-#uid#" x="55" y="45">-- W</text></g>
+			<g class="node bat" transform="translate(10,175)"><rect width="200" height="60"/><text class="lbl" x="100" y="18">🔋 BATTERIE 16 kWh</text><text class="val" id="bat-#uid#" x="100" y="45">-- % · -- W</text></g>
+			<g class="node" transform="translate(300,175)"><rect width="250" height="60"/><text class="lbl" x="125" y="18">LIMITES</text><text id="lim-#uid#" x="125" y="45" style="font-size:13px">Hoymiles -- · charge --</text></g>
+		</svg>
+		<div class="cons" id="cons-#uid#"></div>
+		<div class="ctl">
+			<span>Priorité :</span>
+			<a class="btn btn-xs btn-default" id="bpt-#uid#">Tesla</a>
+			<a class="btn btn-xs btn-default" id="bpb-#uid#">Batterie</a>
+			<span>Cible :</span>
+			<a class="btn btn-xs btn-default" id="b95-#uid#">95 %</a>
+			<a class="btn btn-xs btn-default" id="b100-#uid#">100 %</a>
+			<span>Simulation :</span>
+			<a class="btn btn-xs btn-default" id="bson-#uid#">ON</a>
+			<a class="btn btn-xs btn-default" id="bsoff-#uid#">OFF</a>
+		</div>
+		<div class="dec" id="dec-#uid#"></div>
+	</div>
+	<script>
+		(function () {
+			var uid = '#uid#'
+			var V = { pv: '#pv_val#', grid: '#grid_val#', batt: '#batt_val#', soc: '#soc_val#', house: '#house_val#', inj: '#injection_val#',
+				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#' }
+			var consumers = #consumers#
+			var el = function (id) { return document.getElementById(id + '-' + uid) }
+			var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n }
+			var fmt = function (v) { return Math.round(num(v)) + ' W' }
+			var setFlow = function (id, value, reverseWhenPositive) {
+				var f = el(id), on = Math.abs(num(value)) > 10
+				f.setAttribute('class', 'flow' + (on ? ' on' : '') + ((on && ((num(value) > 0) === reverseWhenPositive)) ? ' rev' : ''))
+			}
+			var mark = function (id, active) { var b = el(id); if (b) { b.className = 'btn btn-xs btn-default' + (active ? ' active' : '') } }
+			function render() {
+				el('pv').textContent = fmt(V.pv)
+				el('grid').textContent = (num(V.grid) < 0 ? 'injection ' : 'soutirage ') + fmt(Math.abs(num(V.grid)))
+				el('house').textContent = fmt(V.house)
+				el('bat').textContent = Math.round(num(V.soc)) + ' % · ' + fmt(V.batt)
+				el('inj').textContent = 'injection ' + fmt(V.inj)
+				el('lim').textContent = 'Hoymiles ' + fmt(V.hoy) + ' · charge ' + fmt(V.chg)
+				el('dec').textContent = V.dec
+				setFlow('fpv', V.pv, false)
+				setFlow('fgrid', V.grid, true)      // soutirage : de la gauche vers le centre
+				setFlow('fbat', V.batt, false)      // charge : du centre vers la batterie
+				setFlow('fhouse', V.house, false)
+				document.getElementById('sim-' + uid).style.display = (String(V.sim) === '1') ? 'inline-block' : 'none'
+				mark('bpt', V.prio === 'tesla'); mark('bpb', V.prio === 'battery')
+				mark('b95', String(V.tgt) === '95'); mark('b100', String(V.tgt) === '100')
+				mark('bson', String(V.sim) === '1'); mark('bsoff', String(V.sim) !== '1')
+				var html = ''
+				consumers.forEach(function (c) {
+					html += '<div class="tile ' + (c.status === 'ON' ? 'on' : '') + '">' + c.name + '<b>' + Math.round(c.power) + ' W</b>' + c.status + '</div>'
+				})
+				document.getElementById('cons-' + uid).innerHTML = html
+			}
+			function bind(cmdId, key) {
+				jeedom.cmd.update[cmdId] = function (_options) { V[key] = _options.display_value; render() }
+			}
+			bind('#pv_id#', 'pv'); bind('#grid_id#', 'grid'); bind('#batt_id#', 'batt'); bind('#soc_id#', 'soc')
+			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#charge_limit_id#', 'chg')
+			bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
+			consumers.forEach(function (c, i) {
+				if (c.power_id) { jeedom.cmd.update[c.power_id] = function (o) { consumers[i].power = num(o.display_value); render() } }
+				if (c.status_id) { jeedom.cmd.update[c.status_id] = function (o) { consumers[i].status = o.display_value; render() } }
+			})
+			var act = function (id, cmdId) { el(id).onclick = function () { jeedom.cmd.execute({ id: cmdId }) } }
+			act('bpt', '#prio_tesla_id#'); act('bpb', '#prio_battery_id#'); act('b95', '#target_95_id#'); act('b100', '#target_100_id#')
+			act('bson', '#sim_on_id#'); act('bsoff', '#sim_off_id#')
+			render()
+		})()
+	</script>
+</div>
