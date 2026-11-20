@@ -109,6 +109,16 @@ class energyManager extends eqLogic {
 		}
 	}
 
+	/** Lit une valeur JSON du cache Jeedom (texte JSON ou valeur déjà décodée). */
+	private static function cacheJson($_key) {
+		$v = cache::byKey($_key)->getValue('');
+		if (is_array($v)) {
+			return $v;
+		}
+		$d = json_decode((string) $v, true);
+		return is_array($d) ? $d : array();
+	}
+
 	/** Un tour de boucle du démon (Jeedom le rappelle toutes les "cycle" secondes). */
 	public static function daemon() {
 		try {
@@ -132,7 +142,7 @@ class energyManager extends eqLogic {
 		$simulation = $_dry || (int) self::cfg('simulation', 1) === 1;
 
 		$minute = (int) date('G', $now) * 60 + (int) date('i', $now);
-		$slots = energyManagerEngine::parseSlotsJson(self::cfg('hc_slots', ''));
+		$slots = energyManagerEngine::parseSlots(self::cfg('hc_slots', ''));
 		$slot = energyManagerEngine::slotAt($slots, $minute);
 		$hcAfternoon = false;
 		$hcAfternoonEnd = null;
@@ -157,7 +167,7 @@ class energyManager extends eqLogic {
 			'hc' => ($slot === 'HC'), 'hc_afternoon' => $hcAfternoon,
 			'cfg' => self::engineConfig(),
 			'equips' => self::buildEquips($now, $minute, $hcAfternoonEnd),
-			'mem' => json_decode(cache::byKey('energyManager::mem')->getValue('{}'), true) ?: array(),
+			'mem' => self::cacheJson('energyManager::mem'),
 		);
 		$hoy = self::readCmd(self::cfg('cmd_hoy_limit_fb'));
 		$chg = self::readCmd(self::cfg('cmd_charge_limit_fb'));
@@ -260,8 +270,7 @@ class energyManager extends eqLogic {
 
 	/** Saison de chauffe/refroidissement selon les 2 sondes extérieures (moyenne 24 h). */
 	public static function season() {
-		$cached = cache::byKey('energyManager::season');
-		$c = json_decode($cached->getValue('{}'), true);
+		$c = self::cacheJson('energyManager::season');
 		if (is_array($c) && isset($c['t']) && (time() - $c['t']) < 600) {
 			return $c['v'];
 		}
@@ -461,7 +470,7 @@ class energyManager extends eqLogic {
 	private static function checkFeedback($_now) {
 		$map = array('hoy' => 'cmd_hoy_limit_fb', 'charge' => 'cmd_charge_limit_fb');
 		foreach ($map as $name => $fbKey) {
-			$p = json_decode(cache::byKey('energyManager::pending::' . $name)->getValue('{}'), true);
+			$p = self::cacheJson('energyManager::pending::' . $name);
 			if (!is_array($p) || !isset($p['t']) || ($_now - $p['t']) < (int) self::cfg('feedback_delay', 90)) {
 				continue;
 			}

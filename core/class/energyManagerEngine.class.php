@@ -353,21 +353,22 @@ class energyManagerEngine {
 	}
 
 	/**
-	 * Lit les plages d'heures creuses : JSON [{"s":"00:50","e":"06:50"}, ...].
+	 * Lit les plages d'heures creuses : texte "00:50-06:50;14:20-16:20".
+	 * (pas de JSON : Jeedom décode automatiquement les valeurs de configuration qui en ont l'allure)
 	 * @return array liste de array(debutMin, finMin, 'HC')
 	 */
-	public static function parseSlotsJson($json) {
+	public static function parseSlots($text) {
 		$slots = array();
-		$list = json_decode((string) $json, true);
-		if (!is_array($list)) {
+		if (!is_string($text)) {
 			return $slots;
 		}
-		foreach ($list as $sl) {
-			if (isset($sl['s'], $sl['e'])
-				&& preg_match('/^\s*(\d{1,2})[:h](\d{2})\s*$/', $sl['s'], $a)
-				&& preg_match('/^\s*(\d{1,2})[:h](\d{2})\s*$/', $sl['e'], $b)
-				&& ($a[1] * 60 + $a[2]) != ($b[1] * 60 + $b[2])) {
-				$slots[] = array($a[1] * 60 + $a[2], $b[1] * 60 + $b[2], 'HC');
+		if (preg_match_all('/(\d{1,2})\s*[:h]\s*(\d{2})\s*-\s*(\d{1,2})\s*[:h]\s*(\d{2})/', $text, $mm, PREG_SET_ORDER)) {
+			foreach ($mm as $m) {
+				$a = $m[1] * 60 + $m[2];
+				$b = $m[3] * 60 + $m[4];
+				if ($a != $b) {
+					$slots[] = array($a, $b, 'HC');
+				}
 			}
 		}
 		return $slots;

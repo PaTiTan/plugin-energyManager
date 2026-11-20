@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Correctif : les plages d'heures creuses n'étaient pas mémorisées (Jeedom décode automatiquement les valeurs ressemblant à du JSON). Nouveau format texte.
+- Lecture du cache plus robuste.
+
 ## 0.2.0
 
 - Intégration de teslasmartcharge : energyManager commande `set_mode` et `set_priorite_charge` et lit `mode_actuel`.

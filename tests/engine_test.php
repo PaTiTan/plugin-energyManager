@@ -178,17 +178,18 @@ $r = energyManagerEngine::decide(base(array('grid' => -1200, 'cfg' => array('tes
 check('Tesla à fond : le radiateur peut démarrer', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
 
 // 25. Plages d'heures creuses (JSON du sélecteur)
-$slots = energyManagerEngine::parseSlotsJson('[{"s":"00:50","e":"06:50"},{"s":"14:20","e":"16:20"}]');
+$slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');
 check('plages : 2 plages lues', count($slots) === 2);
 check('plages : 15h = HC', energyManagerEngine::slotAt($slots, 15 * 60) === 'HC');
 check('plages : 10h = HP', energyManagerEngine::slotAt($slots, 10 * 60) === 'HP');
 check('plages : 3h = HC', energyManagerEngine::slotAt($slots, 3 * 60) === 'HC');
 check('plages : 00h30 = HP', energyManagerEngine::slotAt($slots, 30) === 'HP');
-$nuit = energyManagerEngine::parseSlotsJson('[{"s":"22:00","e":"06:00"}]');
+$nuit = energyManagerEngine::parseSlots('22:00-06:00');
 check('plage à cheval sur minuit : 23h = HC', energyManagerEngine::slotAt($nuit, 23 * 60) === 'HC');
 check('plage à cheval sur minuit : 7h = HP', energyManagerEngine::slotAt($nuit, 7 * 60) === 'HP');
-check('plages : JSON invalide = aucune plage', count(energyManagerEngine::parseSlotsJson('n\'importe quoi')) === 0);
-check('plages : format 22h00 accepté', count(energyManagerEngine::parseSlotsJson('[{"s":"22h00","e":"06h00"}]')) === 1);
+check('plages : texte invalide = aucune plage', count(energyManagerEngine::parseSlots('n\'importe quoi')) === 0);
+check('plages : valeur déjà décodée par Jeedom = aucune plage, sans erreur', count(energyManagerEngine::parseSlots(array(array('s' => '00:50')))) === 0);
+check('plages : format 22h00 accepté', count(energyManagerEngine::parseSlots('22h00-06h00')) === 1);
 
 echo PHP_EOL . ($fail === 0 ? 'Tous les tests passent.' : $fail . ' test(s) en échec.') . PHP_EOL;
 exit($fail === 0 ? 0 : 1);
