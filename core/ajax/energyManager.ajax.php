@@ -112,6 +112,7 @@ try {
 			'stale' => !empty($in['stale']) ? array('cmd_grid (panne simulée)') : array(),
 			'hc' => ($hc['slot'] === 'HC'), 'hc_afternoon' => $hc['afternoon'],
 			'cfg' => $cfg, 'hoy_limit' => (float) $in['hoy_limit'], 'charge_limit' => (float) $in['charge_limit'],
+			'inv_limit' => isset($in['inv_limit']) ? (float) $in['inv_limit'] : (float) $cfg['inv_max'],
 			'equips' => $equips, 'mem' => (isset($in['mem']) && is_array($in['mem'])) ? $in['mem'] : array(),
 		);
 		ajax::success(array('result' => energyManagerEngine::decide($state), 'names' => $names, 'slot' => $hc['slot'], 'hc_afternoon' => $hc['afternoon']));

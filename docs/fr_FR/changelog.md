@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- **Onduleur Victron à 0 W pendant que la Tesla charge** : la batterie maison ne décharge pas pour la Tesla ; la limite onduleur revient à son maximum quand la Tesla ne charge plus (arrêtée ou débranchée), après 30 s. Nécessite l'ordre et le retour « puissance onduleur » dans la configuration Victron. Affichée dans le widget et le simulateur.
+- Correctif : plusieurs textes du fichier de tests `tests/engine_test.php` contenaient des apostrophes non échappées (le fichier ne s'exécutait pas).
+
 ## 0.6.0
 
 - **Correctif : boucle de la limite Hoymiles** (réduction puis retour au maximum toutes les 10 s, écritures répétées du curseur et alertes en rafale).

@@ -172,6 +172,8 @@ class energyManager extends eqLogic {
 		$active = ((int) self::cfg('active', 1) === 1);
 		$fc = self::readCmd(self::cfg('cmd_forecast_kwh'));
 		$state['forecast_kwh'] = ($fc !== null && is_numeric($fc['value'])) ? (float) $fc['value'] : null;
+		$inv = self::readCmd(self::cfg('cmd_inv_limit_fb'));
+		$state['inv_limit'] = ($inv !== null && is_numeric($inv['value'])) ? (float) $inv['value'] : (float) $state['cfg']['inv_max'];
 		$hoy = self::readCmd(self::cfg('cmd_hoy_limit_fb'));
 		$chg = self::readCmd(self::cfg('cmd_charge_limit_fb'));
 		$state['hoy_limit'] = ($hoy !== null && is_numeric($hoy['value'])) ? (float) $hoy['value'] : (float) $state['cfg']['hoy_max'];
@@ -524,6 +526,8 @@ class energyManager extends eqLogic {
 				return (is_object($eq) ? $eq->getName() : '#' . $a['id']) . ' → ' . strtoupper($a['cmd']) . ' : ' . $a['reason'];
 			case 'hoymiles':
 				return 'Limite Hoymiles → ' . $a['value'] . ' W : ' . $a['reason'];
+			case 'inv_limit':
+				return 'Limite onduleur Victron → ' . $a['value'] . ' W : ' . $a['reason'];
 			case 'charge_limit':
 				return 'Limite de charge batterie → ' . $a['value'] . ' W : ' . $a['reason'];
 			case 'tesla_mode':
@@ -565,6 +569,9 @@ class energyManager extends eqLogic {
 				break;
 			case 'hoymiles':
 				self::sendSlider('cmd_hoy_limit', $a['value'], 'hoy', $_now);
+				break;
+			case 'inv_limit':
+				self::sendSlider('cmd_inv_limit', $a['value'], 'inv', $_now);
 				break;
 			case 'charge_limit':
 				self::sendSlider('cmd_charge_limit', $a['value'], 'charge', $_now);
@@ -611,7 +618,7 @@ class energyManager extends eqLogic {
 
 	/** Les ordres Victron / Ahoy doivent être confirmés par leur retour d'information. */
 	private static function checkFeedback($_now) {
-		$map = array('hoy' => 'cmd_hoy_limit_fb', 'charge' => 'cmd_charge_limit_fb');
+		$map = array('hoy' => 'cmd_hoy_limit_fb', 'charge' => 'cmd_charge_limit_fb', 'inv' => 'cmd_inv_limit_fb');
 		foreach ($map as $name => $fbKey) {
 			$p = self::cacheJson('energyManager::pending::' . $name);
 			if (!is_array($p) || !isset($p['t']) || ($_now - $p['t']) < (int) self::cfg('feedback_delay', 90)) {
@@ -718,6 +725,7 @@ class energyManager extends eqLogic {
 			}
 		}
 		$main->checkAndUpdateCmd('hoy_limit', $_state['hoy_limit']);
+		$main->checkAndUpdateCmd('inv_limit', $_state['inv_limit']);
 		$main->checkAndUpdateCmd('charge_limit', $_state['charge_limit']);
 		$main->checkAndUpdateCmd('slot', $_slot);
 		$main->checkAndUpdateCmd('season', self::season());
@@ -781,7 +789,7 @@ class energyManager extends eqLogic {
 			foreach (array(
 				array('pv', 'Production PV', 'W'), array('grid', 'Réseau', 'W'), array('batt', 'Batterie', 'W'),
 				array('soc', 'SOC batterie', '%'), array('house', 'Maison', 'W'), array('injection', 'Injection', 'W'),
-				array('hoy_limit', 'Limite Hoymiles', 'W'), array('charge_limit', 'Limite charge batterie', 'W'),
+				array('hoy_limit', 'Limite Hoymiles', 'W'), array('charge_limit', 'Limite charge batterie', 'W'), array('inv_limit', 'Limite onduleur', 'W'),
 				array('active_info', 'Pilotage actif', ''), array('reserve_info', 'Réserve de nuit', '%'),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'info', 'numeric', $c[2]);
@@ -862,7 +870,7 @@ class energyManager extends eqLogic {
 			return $replace;
 		}
 		$version = jeedom::versionAlias($_version);
-		foreach (array('pv', 'grid', 'batt', 'soc', 'house', 'injection', 'hoy_limit', 'charge_limit', 'decision', 'sim_info',
+		foreach (array('pv', 'grid', 'batt', 'soc', 'house', 'injection', 'hoy_limit', 'charge_limit', 'inv_limit', 'decision', 'sim_info',
 			'tesla_priority_info', 'batt_target_info', 'slot', 'season', 'prio_tesla', 'prio_battery', 'target_95', 'target_100',
 			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set') as $l) {
 			$c = $this->getCmd(null, $l);

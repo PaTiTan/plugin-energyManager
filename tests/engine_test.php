@@ -189,9 +189,9 @@ check('grosse injection : on n\'attend pas la Tesla', find_action($r, 'equip', a
 
 // 24e. Tesla à déclencher : 500 W d'injection tolérés (+200 de bande), pas de bridage en dessous
 $r = energyManagerEngine::decide(base(array('grid' => -650, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
-check('Tesla à déclencher : 650 W d'injection tolérés, Hoymiles non bridé', find_action($r, 'hoymiles') === null);
+check('Tesla à déclencher : 650 W d\'injection tolérés, Hoymiles non bridé', find_action($r, 'hoymiles') === null);
 $r = energyManagerEngine::decide(base(array('grid' => -800, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
-check('Tesla à déclencher : 800 W > budget 500 W, réduction jusqu'au budget (pas à zéro)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3700);
+check('Tesla à déclencher : 800 W > budget 500 W, réduction jusqu\'au budget (pas à zéro)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3700);
 
 // 24f. Tesla déjà à fond : plus de place, les autres consommateurs peuvent démarrer
 $teslaPleine = array_merge($teslaSolaire, array('power_real' => 6900));
@@ -255,7 +255,7 @@ check('après l\'échéance : complément EDF validé', find_action($r, 'equip',
 $teslaBranchee = array('id' => 92, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 0, 'power_theo' => 7000, 'priority' => 1);
 $r = energyManagerEngine::decide(base(array('pv' => 2000, 'grid' => -100, 'hoy_limit' => 2000, 'equips' => array($teslaBranchee),
 	'mem' => array('last_hoy_write' => 1000000 - 60))));
-check('Tesla à déclencher : on libère 500 W (pas tout d'un coup)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 2500);
+check('Tesla à déclencher : on libère 500 W (pas tout d\'un coup)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 2500);
 
 // 28b. Rien à alimenter (batterie pleine, pas de charge) : la limite bridée reste bridée
 $r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 2000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(),
@@ -281,7 +281,7 @@ check('ballon > 50 °C et injection critique : limite bridée', ($a = find_actio
 $teslaEnCharge = array('id' => 93, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 1500, 'power_theo' => 7200, 'priority' => 1);
 $r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equips' => array($teslaEnCharge),
 	'mem' => array('inj_any_since' => 1000000 - 400, 'inj_since' => 1000000 - 100))));
-check('Tesla en charge (budget 1000 W) : réduction seulement jusqu'au budget', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 5500);
+check('Tesla en charge (budget 1000 W) : réduction seulement jusqu\'au budget', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 5500);
 
 // 29b. Tesla bloquée (injection critique depuis plus de 5 min) : on finit par brider pour ne pas injecter
 $r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equips' => array($teslaEnCharge),
@@ -304,13 +304,13 @@ check('ballon terminé mais froid (solaire) : rechauffe', find_action($r, 'equip
 
 $r = energyManagerEngine::decide(base(array('minute' => 15 * 60, 'pv' => 100, 'batt' => 0, 'hc_afternoon' => true,
 	'equips' => array(ecs(array('done_today' => true, 'water_temp' => 45))))));
-check('ballon terminé mais froid (HC d'après-midi) : chauffe EDF', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+check('ballon terminé mais froid (HC d\'après-midi) : chauffe EDF', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
 
 $r = energyManagerEngine::decide(base(array('minute' => 16 * 60 + 5, 'pv' => 3000, 'batt' => 0,
 	'equips' => array(ecs(array('done_today' => true, 'water_temp' => 45))))));
 $al = null;
 foreach ($r['alerts'] as $x) { if (strpos($x['key'], 'ecs_deadline') === 0) { $al = $x; } }
-check('ballon terminé mais froid à l'échéance : pas de chauffe et alerte', find_action($r, 'equip', array('cmd' => 'on')) === null && $al !== null);
+check('ballon terminé mais froid à l\'échéance : pas de chauffe et alerte', find_action($r, 'equip', array('cmd' => 'on')) === null && $al !== null);
 
 // 31. Tesla branchée : passage automatique en Solaire, une seule fois par branchement
 $teslaStandby = array('id' => 95, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => false, 'power_real' => 0, 'power_theo' => 7200,
@@ -325,10 +325,10 @@ $r = energyManagerEngine::decide(base(array('equips' => array(array_merge($tesla
 check('Tesla débranchée : rien', find_action($r, 'tesla_mode') === null);
 
 $r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('mode' => 'off', 'tesla_mode' => 'Non actif'))))));
-check('Tesla « Non actif » : on n'y touche pas', find_action($r, 'tesla_mode') === null);
+check('Tesla « Non actif » : on n\'y touche pas', find_action($r, 'tesla_mode') === null);
 
 $r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('tesla_mode' => 'Planifié'))))));
-check('Tesla « Planifié » choisi par l'utilisateur : on n'y touche pas', find_action($r, 'tesla_mode') === null);
+check('Tesla « Planifié » choisi par l\'utilisateur : on n\'y touche pas', find_action($r, 'tesla_mode') === null);
 
 $r = energyManagerEngine::decide(base(array('equips' => array(array_merge($teslaStandby, array('plugged' => null))))));
 check('Tesla : branchement inconnu : rien', find_action($r, 'tesla_mode') === null);
@@ -342,7 +342,7 @@ check('agressivité grande : budget 2000 W', ($a = find_action($r, 'hoymiles')) 
 // 32b. Même agressivité mais Tesla pas encore en charge : seulement 500 W pour la déclencher
 $teslaGrandeAttente = array_merge($teslaGrande, array('power_real' => 0));
 $r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => -800, 'equips' => array($teslaGrandeAttente))));
-check('agressivité grande mais Tesla à l'arrêt : budget 500 W', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3700);
+check('agressivité grande mais Tesla à l\'arrêt : budget 500 W', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3700);
 
 // 32c. Tesla en charge qui a consommé ce qui était libéré : palier suivant (+budget)
 $teslaMoyenne = array_merge($teslaEnCharge, array('aggr_w' => 1000, 'power_real' => 3000));
@@ -370,11 +370,32 @@ $r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -1500, 'equi
 	'mem' => array('tesla_prev_w' => 3000, 'inj_since' => 1000000 - 60))));
 $k = false;
 foreach ($r['alerts'] as $x) { if ($x['key'] === 'injection') { $k = true; } }
-check('Tesla dans son budget : pas d'alerte d'injection critique', !$k);
+check('Tesla dans son budget : pas d\'alerte d\'injection critique', !$k);
 $r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -1500, 'equips' => array(), 'mem' => array('inj_since' => 1000000 - 60))));
 $k = false;
 foreach ($r['alerts'] as $x) { if ($x['key'] === 'injection') { $k = true; } }
-check('sans Tesla : alerte d'injection critique', $k);
+check('sans Tesla : alerte d\'injection critique', $k);
+
+// 33. Onduleur Victron : à 0 W pendant que la Tesla charge (pas de décharge de la batterie maison)
+$r = energyManagerEngine::decide(base(array('inv_limit' => 4000, 'equips' => array($teslaEnCharge), 'mem' => array('tesla_prev_w' => 1500))));
+check('Tesla en charge : onduleur à 0 W', ($a = find_action($r, 'inv_limit')) !== null && $a['value'] == 0);
+
+$r = energyManagerEngine::decide(base(array('inv_limit' => 0, 'equips' => array($teslaEnCharge), 'mem' => array('tesla_prev_w' => 1500))));
+check('Tesla en charge, onduleur déjà à 0 W : rien à envoyer', find_action($r, 'inv_limit') === null);
+
+$teslaArret = array_merge($teslaEnCharge, array('power_real' => 0));
+$r = energyManagerEngine::decide(base(array('inv_limit' => 0, 'equips' => array($teslaArret), 'mem' => array('tesla_off_since' => 1000000 - 60))));
+check('Tesla à l\'arrêt depuis 60 s : onduleur remis au maximum', ($a = find_action($r, 'inv_limit')) !== null && $a['value'] == 4000);
+
+$r = energyManagerEngine::decide(base(array('inv_limit' => 0, 'equips' => array($teslaArret), 'mem' => array())));
+check('Tesla qui vient de s\'arrêter : on attend avant de rendre l\'onduleur', find_action($r, 'inv_limit') === null);
+
+$r = energyManagerEngine::decide(base(array('inv_limit' => 0, 'equips' => array(), 'mem' => array('tesla_off_since' => 1000000 - 60))));
+check('Tesla débranchée / absente : onduleur remis au maximum', ($a = find_action($r, 'inv_limit')) !== null && $a['value'] == 4000);
+
+$teslaNonActif = array_merge($teslaEnCharge, array('mode' => 'off', 'active' => false, 'power_real' => 3000));
+$r = energyManagerEngine::decide(base(array('inv_limit' => 4000, 'equips' => array($teslaNonActif))));
+check('Tesla qui charge même hors mode solaire : onduleur à 0 W', ($a = find_action($r, 'inv_limit')) !== null && $a['value'] == 0);
 
 // 25. Plages d'heures creuses (JSON du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');

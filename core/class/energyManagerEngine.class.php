@@ -54,6 +54,7 @@ class energyManagerEngine {
 		'tesla_patience'    => 300,   // s - injection critique durable malgré une Tesla en solaire : on la considère bloquée (API, réveil...)
 		'tesla_trigger_w'   => 500,   // W - puissance libérée pour DÉCLENCHER la charge de la Tesla (quelle que soit l'agressivité)
 		'tesla_jump'        => 800,   // W - hausse brutale de la charge Tesla (réglage manuel) : la limite Hoymiles passe au maximum
+		'inv_release_delay' => 30,    // s - la Tesla doit être à l'arrêt depuis ce délai avant de rendre l'onduleur à sa valeur maximale
 		'hoy_band'          => 200,   // W - tolérance autour du budget d'injection avant de réduire
 		'hoy_step_interval' => 30,    // s - délai mini entre deux paliers de libération de la limite Hoymiles
 		'tesla_hold_max'    => 1500,  // W - au-delà de cette injection, on n'attend plus la Tesla
@@ -79,7 +80,7 @@ class energyManagerEngine {
 	public static function decide(array $s) {
 		$cfg = array_merge(self::DEFAULTS, isset($s['cfg']) ? $s['cfg'] : array());
 		$mem = array_merge(array(
-			'inj_since' => 0, 'imp_since' => 0, 'inj_any_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0, 'hoy_hidden' => 0, 'tesla_prev_w' => 0,
+			'inj_since' => 0, 'imp_since' => 0, 'inj_any_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0, 'hoy_hidden' => 0, 'tesla_prev_w' => 0, 'tesla_off_since' => 0,
 		), isset($s['mem']) ? $s['mem'] : array());
 		$out = array('actions' => array(), 'alerts' => array(), 'info' => array(), 'mem' => $mem);
 		$now = (int) $s['now'];
@@ -384,6 +385,29 @@ class energyManagerEngine {
 		if ($reasonHoy !== '' && $delta >= $cfg['hoy_min_delta'] && ($intervalOk || $forceWrite || ($critical && $isReduction) || ($stepRaise && $stepOk))) {
 			$out['actions'][] = array('type' => 'hoymiles', 'value' => round($newHoy), 'reason' => $reasonHoy);
 			$mem['last_hoy_write'] = $now;
+		}
+
+		/* ---------- 5b. Onduleur Victron : pas de décharge de la batterie maison pendant que la Tesla charge ---------- */
+		// teslasmartcharge ne doit vivre que du soleil (+ sa marge EDF). Pendant la charge, la limite onduleur passe à 0 W ;
+		// elle revient au maximum quand la Tesla ne charge plus (arrêtée, débranchée...), après un court délai pour éviter les va-et-vient.
+		$invCurrent = (isset($s['inv_limit']) && is_numeric($s['inv_limit'])) ? (float) $s['inv_limit'] : (float) $cfg['inv_max'];
+		$teslaChargingAny = false;
+		foreach ($equips as $e) {
+			if ($e['type'] === 'tesla' && (float) $e['power_real'] >= $cfg['tesla_min_w']) {
+				$teslaChargingAny = true;
+			}
+		}
+		$mem['tesla_off_since'] = $teslaChargingAny ? 0 : ($mem['tesla_off_since'] ?: $now);
+		$wantInv = (float) $cfg['inv_max'];
+		$reasonInv = 'la Tesla ne charge plus : onduleur remis à sa valeur maximale';
+		if ($teslaChargingAny) {
+			$wantInv = 0.0;
+			$reasonInv = 'Tesla en charge : la batterie ne doit pas décharger (onduleur à 0 W)';
+		} elseif (($now - $mem['tesla_off_since']) < $cfg['inv_release_delay']) {
+			$wantInv = $invCurrent; // arrêt trop récent : on attend
+		}
+		if (abs($wantInv - $invCurrent) >= 5) {
+			$out['actions'][] = array('type' => 'inv_limit', 'value' => round($wantInv), 'reason' => $reasonInv);
 		}
 
 		/* ---------- 6. Alertes ---------- */

@@ -197,7 +197,7 @@
       S.grid = -(net - S.batt)
     } else {
       // déficit : batterie d'abord, jamais de charge depuis EDF
-      var d = S.soc > cfg.soc_min ? Math.min(-net, cfg.inv_max) : 0
+      var d = S.soc > cfg.soc_min ? Math.min(-net, S.inv) : 0
       S.batt = -d
       S.grid = -net - d
     }
@@ -209,6 +209,7 @@
     if (a.type === 'equip') { var e = byId(a.id); return (e ? e.name : '#' + a.id) + ' → ' + String(a.cmd).toUpperCase() + ' : ' + a.reason }
     if (a.type === 'tesla_mode') { var tm = byId(a.id); return (tm ? tm.name : '#' + a.id) + ' → mode ' + a.value + ' : ' + a.reason }
     if (a.type === 'hoymiles') { return 'Limite Hoymiles → ' + a.value + ' W : ' + a.reason }
+    if (a.type === 'inv_limit') { return 'Limite onduleur Victron → ' + a.value + ' W : ' + a.reason }
     if (a.type === 'charge_limit') { return 'Limite de charge batterie → ' + a.value + ' W : ' + a.reason }
     return JSON.stringify(a)
   }
@@ -222,7 +223,7 @@
     inflight = true
     var state = {
       now: Math.floor(S.t), minute: minuteOf(S.t), grid: S.grid, pv: S.pv, soc: S.soc, batt: S.batt, house: S.house,
-      stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio, night_reserve: S.reserve }, hoy_limit: S.hoy, charge_limit: S.chg,
+      stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio, night_reserve: S.reserve }, hoy_limit: S.hoy, charge_limit: S.chg, inv_limit: S.inv,
       forecast_kwh: S.useForecast ? S.forecast : null,
       equips: S.equips, mem: S.mem
     }
@@ -242,6 +243,7 @@
         } else if (a.type === 'tesla_mode') { var te = byId(a.id); if (te) { te.tesla_mode = a.value; te.plug_handled = true } }
         else if (a.type === 'hoymiles') { S.hoy = num(a.value) }
         else if (a.type === 'charge_limit') { S.chg = num(a.value) }
+        else if (a.type === 'inv_limit') { S.inv = num(a.value) }
       })
       r.alerts.forEach(function (al) {
         var last = alertLast[al.key]
@@ -283,7 +285,7 @@
     el('house').textContent = W(S.house)
     el('bat').textContent = Math.round(S.soc) + ' % · ' + W(S.batt)
     el('inj').textContent = 'injection ' + W(Math.max(0, -S.grid))
-    el('lim').textContent = 'Hoymiles ' + W(S.hoy) + ' · charge ' + W(S.chg)
+    el('lim').textContent = 'Hoymiles ' + W(S.hoy) + ' · charge ' + W(S.chg) + ' · onduleur ' + W(S.inv)
     setFlow('fpv', S.pv, false); setFlow('fgrid', S.grid, false); setFlow('fbat', S.batt, false); setFlow('fhouse', S.house, false)
 
     el('clock').textContent = clockText(S.t)
@@ -343,7 +345,7 @@
     S = {
       t: (function () { var d = new Date(); d.setHours(12, 0, 0, 0); return d.getTime() / 1000 })(),
       pvAvail: 4000, talon: 500, soc: 60, auto: false, stale: false, active: true, running: true, speed: num($('#ems-speed').val()) || 10,
-      cfg: init.cfg, hoy: num(init.cfg.hoy_max), chg: num(init.cfg.charge_max),
+      cfg: init.cfg, hoy: num(init.cfg.hoy_max), chg: num(init.cfg.charge_max), inv: num(init.cfg.inv_max),
       prio: init.tesla_priority === 'battery' ? 'battery' : 'tesla', target: init.batt_target === 95 ? 95 : 100,
       reserve: num(init.cfg.night_reserve), forecast: 10, useForecast: false, night: null,
       equips: init.equips, mem: {}, since: CYCLE, slot: 'HP', decision: '', decisionAlert: false, day: null,

@@ -53,7 +53,7 @@
 			<g class="node" transform="translate(210,105)"><rect width="140" height="40"/><text class="lbl" x="70" y="16">MULTIPLUS II</text><text id="inj-#uid#" x="70" y="33" style="font-size:12px">injection 0 W</text></g>
 			<g class="node house" transform="translate(440,95)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">🏠 MAISON</text><text class="val" id="house-#uid#" x="55" y="45">-- W</text></g>
 			<g class="node bat" transform="translate(10,175)"><rect width="200" height="60"/><text class="lbl" x="100" y="18">🔋 BATTERIE 16 kWh</text><text class="val" id="bat-#uid#" x="100" y="45">-- % · -- W</text></g>
-			<g class="node" transform="translate(300,175)"><rect width="250" height="60"/><text class="lbl" x="125" y="18">LIMITES</text><text id="lim-#uid#" x="125" y="45" style="font-size:13px">Hoymiles -- · charge --</text></g>
+			<g class="node" transform="translate(300,175)"><rect width="250" height="60"/><text class="lbl" x="125" y="18">LIMITES</text><text id="lim-#uid#" x="125" y="45" style="font-size:11px">Hoymiles -- · charge --</text></g>
 		</svg>
 		<div class="cons" id="cons-#uid#"></div>
 		<div class="ctl">
@@ -75,7 +75,7 @@
 		(function () {
 			var uid = '#uid#'
 			var V = { pv: '#pv_val#', grid: '#grid_val#', batt: '#batt_val#', soc: '#soc_val#', house: '#house_val#', inj: '#injection_val#',
-				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#', rsv: '#reserve_info_val#' }
+				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', inv: '#inv_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#', rsv: '#reserve_info_val#' }
 			var consumers = #consumers#
 			var el = function (id) { return document.getElementById(id + '-' + uid) }
 			var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n }
@@ -91,7 +91,7 @@
 				el('house').textContent = fmt(V.house)
 				el('bat').textContent = Math.round(num(V.soc)) + ' % · ' + fmt(V.batt)
 				el('inj').textContent = 'injection ' + fmt(V.inj)
-				el('lim').textContent = 'Hoymiles ' + fmt(V.hoy) + ' · charge ' + fmt(V.chg)
+				el('lim').textContent = 'Hoymiles ' + fmt(V.hoy) + ' · charge ' + fmt(V.chg) + ' · onduleur ' + fmt(V.inv)
 				el('dec').textContent = V.dec
 				setFlow('fpv', V.pv, false)
 				setFlow('fgrid', V.grid, false)     // soutirage (positif) : du réseau vers la maison ; injection : sens inverse
@@ -118,7 +118,7 @@
 				jeedom.cmd.update[cmdId] = function (_options) { V[key] = _options.display_value; render() }
 			}
 			bind('#pv_id#', 'pv'); bind('#grid_id#', 'grid'); bind('#batt_id#', 'batt'); bind('#soc_id#', 'soc')
-			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#charge_limit_id#', 'chg')
+			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#inv_limit_id#', 'inv'); bind('#charge_limit_id#', 'chg')
 			bind('#active_info_id#', 'act'); bind('#reserve_info_id#', 'rsv'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
 			consumers.forEach(function (c, i) {
 				if (c.power_id) { jeedom.cmd.update[c.power_id] = function (o) { consumers[i].power = num(o.display_value); render() } }
