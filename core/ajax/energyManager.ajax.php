@@ -66,7 +66,7 @@ try {
 			);
 		}
 		ajax::success(array(
-			'equips' => $equips, 'demo' => $demo, 'cfg' => energyManager::engineConfig(),
+			'equips' => $equips, 'demo' => $demo, 'cfg' => array_merge(energyManagerEngine::DEFAULTS, energyManager::engineConfig()),
 			'hc_slots' => (string) energyManager::cfg('hc_slots', ''),
 			'tesla_priority' => energyManager::cfg('tesla_priority', 'tesla'), 'batt_target' => (int) energyManager::cfg('batt_target', 100),
 		));
@@ -83,6 +83,9 @@ try {
 		$cfg = energyManager::engineConfig();
 		if (isset($in['cfg']['batt_target'])) {
 			$cfg['batt_target'] = ((int) $in['cfg']['batt_target'] === 95) ? 95 : 100;
+		}
+		if (isset($in['cfg']['night_reserve'])) {
+			$cfg['night_reserve'] = max(0, min(100, (float) $in['cfg']['night_reserve']));
 		}
 		if (isset($in['cfg']['tesla_priority'])) {
 			$cfg['tesla_priority'] = ($in['cfg']['tesla_priority'] === 'battery') ? 'battery' : 'tesla';
@@ -102,6 +105,7 @@ try {
 			'now' => (int) $in['now'], 'minute' => $minute,
 			'grid' => (float) $in['grid'], 'pv' => (float) $in['pv'], 'soc' => (float) $in['soc'],
 			'batt' => (float) $in['batt'], 'house' => (float) $in['house'],
+			'forecast_kwh' => (isset($in['forecast_kwh']) && is_numeric($in['forecast_kwh'])) ? (float) $in['forecast_kwh'] : null,
 			'stale' => !empty($in['stale']) ? array('cmd_grid (panne simulée)') : array(),
 			'hc' => ($hc['slot'] === 'HC'), 'hc_afternoon' => $hc['afternoon'],
 			'cfg' => $cfg, 'hoy_limit' => (float) $in['hoy_limit'], 'charge_limit' => (float) $in['charge_limit'],

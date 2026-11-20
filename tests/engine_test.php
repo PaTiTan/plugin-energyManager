@@ -196,6 +196,85 @@ $teslaPleine = array_merge($teslaSolaire, array('power_real' => 6900));
 $r = energyManagerEngine::decide(base(array('grid' => -1200, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaPleine, rad(1)))));
 check('Tesla à fond : le radiateur peut démarrer', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
 
+// 26. Réserve de nuit : SOC trop bas, le ballon ne prend pas le solaire destiné à la batterie
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'pv' => 4000, 'grid' => 0, 'batt' => 3000, 'equips' => array(ecs()))));
+check('réserve de nuit : SOC 40 % < 50 %, le ballon n\'est pas prioritaire sur la batterie', find_action($r, 'equip', array('cmd' => 'on')) === null);
+check('réserve de nuit : la décision l\'explique', strpos($r['info']['decision'], 'réserve de nuit') !== false);
+
+// 26b. SOC bas mais vraie injection (batterie déjà au maximum de charge) : le ballon l'utilise
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'pv' => 6000, 'grid' => -2500, 'batt' => 3680, 'equips' => array(ecs()))));
+check('SOC bas + injection réelle : le ballon démarre', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+// 26c. SOC bas, heure creuse d'après-midi, pas de soleil : EDF chauffe
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'pv' => 100, 'batt' => 0, 'hc_afternoon' => true, 'equips' => array(ecs()))));
+check('SOC bas + HC d\'après-midi : chauffe EDF', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+// 26d. Avec une prévision solaire généreuse, le SOC projeté au soir dépasse la réserve : le ballon passe avant la batterie
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'minute' => 12 * 60, 'forecast_kwh' => 12, 'pv' => 4000, 'grid' => 0, 'batt' => 3000, 'equips' => array(ecs()))));
+check('prévision 12 kWh : SOC projeté suffisant, ballon prioritaire', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null && $r['info']['ecs_may_take'] === 1);
+
+// 26e. Prévision faible : réserve non garantie
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'minute' => 12 * 60, 'forecast_kwh' => 2, 'pv' => 4000, 'grid' => 0, 'batt' => 3000, 'equips' => array(ecs()))));
+check('prévision 2 kWh : ballon pas prioritaire sur la batterie', find_action($r, 'equip', array('cmd' => 'on')) === null && $r['info']['ecs_may_take'] === 0);
+
+// 26f. Le ballon alimenté en solaire ne doit pas décharger la batterie sous la réserve
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'pv' => 1500, 'grid' => 0, 'batt' => -800,
+	'equips' => array(ecs(array('is_on' => true, 'power_real' => 2300))))));
+$a = find_action($r, 'equip', array('id' => 50, 'cmd' => 'off'));
+check('batterie qui se décharge sous la réserve : ballon coupé', $a !== null && strpos($a['reason'], 'réserve de nuit') !== false);
+
+// 26g. SOC suffisant : la batterie peut compenser (pas de coupure)
+$r = energyManagerEngine::decide(base(array('soc' => 80, 'pv' => 1500, 'grid' => 0, 'batt' => -800,
+	'equips' => array(ecs(array('is_on' => true, 'power_real' => 2300))))));
+check('SOC suffisant : le ballon peut être compensé par la batterie', find_action($r, 'equip', array('id' => 50, 'cmd' => 'off')) === null);
+
+// 27. Échéance du ballon à 16 h : non chaud => OFF + alerte (une seule fois par jour côté plugin)
+$r = energyManagerEngine::decide(base(array('minute' => 16 * 60 + 5, 'pv' => 3000, 'batt' => 0,
+	'equips' => array(ecs(array('is_on' => true, 'power_real' => 2300, 'water_temp' => 45))))));
+check('échéance 16 h : ballon froid mis sur OFF', find_action($r, 'equip', array('id' => 50, 'cmd' => 'off')) !== null);
+$al = null;
+foreach ($r['alerts'] as $x) { if (strpos($x['key'], 'ecs_deadline') === 0) { $al = $x; } }
+check('échéance 16 h : alerte unique', $al !== null && !empty($al['once']));
+
+$r = energyManagerEngine::decide(base(array('minute' => 16 * 60 + 5, 'pv' => 3000, 'batt' => 0,
+	'equips' => array(ecs(array('water_temp' => 56))))));
+$none = true;
+foreach ($r['alerts'] as $x) { if (strpos($x['key'], 'ecs_deadline') === 0) { $none = false; } }
+check('échéance 16 h : ballon chaud, pas d\'alerte', $none);
+
+$r = energyManagerEngine::decide(base(array('minute' => 15 * 60, 'pv' => 100, 'hc_afternoon' => true, 'equips' => array(ecs(array('water_temp' => 45))))));
+check('avant 16 h : pas d\'alerte et chauffe EDF en HC', count($r['alerts']) === 0 && find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+// 27b. Après l'échéance, la réponse Discord « Oui » (force_edf) permet de compléter
+$r = energyManagerEngine::decide(base(array('minute' => 17 * 60, 'pv' => 100, 'equips' => array(ecs(array('water_temp' => 45, 'force_edf' => true))))));
+check('après l\'échéance : complément EDF validé', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+// 28. Hoymiles : une charge arrive (Tesla en mode solaire avec de la place) => limite remise au max IMMÉDIATEMENT
+$teslaBranchee = array('id' => 92, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 0, 'power_theo' => 7000, 'priority' => 1);
+$r = energyManagerEngine::decide(base(array('pv' => 2000, 'grid' => -100, 'hoy_limit' => 2000, 'equips' => array($teslaBranchee),
+	'mem' => array('last_hoy_write' => 1000000 - 5))));
+check('charge qui arrive : limite remise au max sans attendre', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 7600);
+
+// 28b. Rien à alimenter (batterie pleine, pas de charge) : la limite bridée reste bridée
+$r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 2000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(),
+	'mem' => array('last_hoy_write' => 1000000 - 500))));
+check('rien à alimenter : la limite bridée reste', find_action($r, 'hoymiles') === null);
+
+// 28c. Un consommateur voudrait démarrer et le surplus masqué par le bridage suffit : limite remise au max
+$r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 2000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(rad(1)),
+	'mem' => array('hoy_hidden' => 1500, 'last_hoy_write' => 1000000 - 5))));
+check('consommateur en attente + surplus masqué : limite au max', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 7600);
+
+// 28d. Même cas sans surplus masqué : on ne rouvre pas pour rien (pas de bascule)
+$r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 2000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(rad(1)),
+	'mem' => array('hoy_hidden' => 0, 'last_hoy_write' => 1000000 - 5))));
+check('consommateur en attente sans surplus masqué : limite inchangée', find_action($r, 'hoymiles') === null);
+
+// 28e. Ballon > 50 °C : il n'est plus un consommateur à alimenter
+$r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 5000, 'grid' => -1500, 'batt' => 0,
+	'equips' => array(ecs(array('water_temp' => 51, 'min_temp' => 55))), 'mem' => array('last_start' => 1000000))));
+check('ballon > 50 °C et injection critique : limite bridée', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] < 7600);
+
 // 25. Plages d'heures creuses (JSON du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');
 check('plages : 2 plages lues', count($slots) === 2);

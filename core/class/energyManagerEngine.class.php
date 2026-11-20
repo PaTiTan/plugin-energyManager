@@ -51,7 +51,15 @@ class energyManagerEngine {
 		'tesla_room_margin' => 500,   // W - la Tesla peut encore absorber si sa puissance est inférieure de plus que cette marge à son maximum
 		'tesla_grace'       => 120,   // s - délai laissé à la Tesla (confirmation 60 s + API) avant d'agir sans elle
 		'tesla_hold_max'    => 1500,  // W - au-delà de cette injection, on n'attend plus la Tesla
-		'ecs_pv_ok'         => 500,   // W - production à laquelle on estime que le ballon sera chauffé par le soleil
+		'ecs_pv_ok'         => 500,   // W - (réservé)
+		'night_reserve'     => 50,    // % - SOC à garder pour la nuit (jauge du widget)
+		'ecs_deadline'      => 960,   // minute du jour (16 h) : le ballon doit avoir atteint son thermostat
+		'ecs_absorb_temp'   => 50,    // °C - au-delà, le ballon n'absorbe plus (limite Hoymiles)
+		'ecs_liters'        => 200,   // L - pour estimer l'énergie à chauffer
+		'ecs_nominal'       => 60,    // °C - température visée pour cette estimation
+		'evening'           => 1140,  // minute du jour (19 h) : le soir, quand la production passe sous le talon
+		'talon'             => 400,   // W - consommation de base de la maison
+		'batt_kwh'          => 16,    // kWh - capacité de la batterie
 	);
 
 	/**
@@ -65,7 +73,7 @@ class energyManagerEngine {
 	public static function decide(array $s) {
 		$cfg = array_merge(self::DEFAULTS, isset($s['cfg']) ? $s['cfg'] : array());
 		$mem = array_merge(array(
-			'inj_since' => 0, 'imp_since' => 0, 'inj_any_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0,
+			'inj_since' => 0, 'imp_since' => 0, 'inj_any_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0, 'hoy_hidden' => 0,
 		), isset($s['mem']) ? $s['mem'] : array());
 		$out = array('actions' => array(), 'alerts' => array(), 'info' => array(), 'mem' => $mem);
 		$now = (int) $s['now'];
@@ -124,9 +132,13 @@ class energyManagerEngine {
 		$teslaHolds = $teslaSolar && $teslaRoom && $cfg['tesla_priority'] === 'tesla'
 			&& !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
 
-		// Surplus que le BALLON peut réclamer : il est prioritaire sur la batterie et sur la Tesla.
-		// = injection + puissance qui part dans la batterie + puissance déjà prise par la Tesla (teslasmartcharge s'ajustera).
+		// Surplus que le BALLON peut réclamer.
+		// Il est prioritaire sur la batterie et sur la Tesla, MAIS seulement si la batterie gardera de quoi tenir la nuit :
+		//  - avec une prévision solaire (kWh restants) : SOC projeté au soir = SOC + (prévision - talon jusqu'au soir - énergie du ballon) / capacité
+		//  - sans prévision : le SOC actuel (la batterie ne descend pas sous son SOC actuel en journée)
+		// Sinon, le ballon ne prend que l'injection réelle (batterie d'abord) ou l'heure creuse EDF.
 		$battCharge = (isset($s['batt']) && is_numeric($s['batt'])) ? max(0, (float) $s['batt']) : 0;
+		$battNow = (isset($s['batt']) && is_numeric($s['batt'])) ? (float) $s['batt'] : 0;
 		$teslaDraw = 0;
 		foreach ($equips as $e) {
 			if ($e['type'] === 'tesla' && $e['mode'] === 'auto' && !empty($e['active'])) {
@@ -134,7 +146,24 @@ class energyManagerEngine {
 			}
 		}
 		$potential = $injection + $battCharge + $teslaDraw;
-		$s['_potential'] = $potential;
+		$minuteNow = isset($s['minute']) ? (int) $s['minute'] : 0;
+		$forecast = (isset($s['forecast_kwh']) && is_numeric($s['forecast_kwh'])) ? (float) $s['forecast_kwh'] : null;
+		$projected = $soc;
+		if ($forecast !== null) {
+			$hoursLeft = max(0, ((float) $cfg['evening'] - $minuteNow) / 60);
+			$ecsKwh = 0;
+			foreach ($equips as $e) {
+				if ($e['type'] === 'ecs' && empty($e['done_today']) && $e['mode'] === 'auto') {
+					$wt = (isset($e['water_temp']) && $e['water_temp'] !== null) ? (float) $e['water_temp'] : 20.0;
+					$ecsKwh += max(0, $cfg['ecs_liters'] * 1.163 * ($cfg['ecs_nominal'] - $wt) / 1000);
+				}
+			}
+			$projected = $soc + (($forecast - $cfg['talon'] * $hoursLeft / 1000 - $ecsKwh) / $cfg['batt_kwh']) * 100;
+		}
+		$projected = min(100, $projected);
+		$ecsMayTake = ($projected >= $cfg['night_reserve']);
+		$ecsAvail = $ecsMayTake ? $potential : $injection;
+		$s['_potential'] = $ecsAvail;
 		$waiting = array();
 
 		/* ---------- 3. Limite de charge batterie ---------- */
@@ -159,6 +188,7 @@ class energyManagerEngine {
 
 		/* ---------- 4. Consommateurs ---------- */
 		$started = false;
+		$absorbPending = false;  // un consommateur démarrerait si la production n'était pas bridée / après stabilisation
 		$wantsPending = false;   // un consommateur voudrait démarrer mais attend
 		$cands = array();
 		foreach ($equips as $e) {
@@ -200,6 +230,17 @@ class energyManagerEngine {
 			}
 		}
 
+		// 4b'. réserve de nuit : le ballon alimenté en solaire ne doit pas vider la batterie
+		if (!$ecsMayTake && $battNow <= -100) {
+			foreach ($cands as $e) {
+				if ($e['type'] === 'ecs' && $e['is_on'] && $e['mode'] === 'auto' && $e['_source'] === 'solar'
+					&& !self::alreadyOff($out['actions'], $e['id'])) {
+					$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'off',
+						'reason' => 'réserve de nuit : le ballon ne doit pas décharger la batterie (SOC projeté ' . round($projected) . ' % < ' . round($cfg['night_reserve']) . ' %)');
+				}
+			}
+		}
+
 		// 4c. démarrage : forcés et besoins EDF autorisés d'abord, puis surplus solaire
 		foreach ($cands as $e) {
 			if ($e['is_on'] || !$e['_want'] || self::alreadyOff($out['actions'], $e['id'])) {
@@ -210,24 +251,32 @@ class energyManagerEngine {
 				continue;
 			}
 			// solaire : un seul démarrage par cycle, et seulement si le surplus le justifie
-			// le ballon est prioritaire : il n'attend ni la Tesla ni la batterie
+			// le ballon est prioritaire : il n'attend ni la Tesla ni la batterie (sous réserve de la réserve de nuit)
 			$isEcs = ($e['type'] === 'ecs');
+			$hot = ($isEcs && isset($e['water_temp']) && $e['water_temp'] !== null && $e['water_temp'] >= $cfg['ecs_absorb_temp']);
 			if ($started || ($teslaHolds && !$isEcs)) {
 				$wantsPending = true;
 				$waiting[] = $e['name'] . ' attend ' . ($started ? 'le prochain cycle (un démarrage à la fois)' : 'que la Tesla monte en puissance (priorité Tesla)');
 				continue;
 			}
-			$avail = $isEcs ? $potential : $injection;
+			$avail = $isEcs ? $ecsAvail : $injection;
 			$need = $e['power_theo'] * $cfg['start_ratio'] + (($teslaSolar && !$isEcs) ? $cfg['tesla_margin'] : 0);
 			$settled = ($now - $mem['last_start']) >= $cfg['settle'];
 			if ($avail >= $need && $settled) {
 				$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'on',
-					'reason' => 'surplus ' . round($avail) . ' W ≥ ' . round($need) . ' W' . ($isEcs ? ' (prioritaire sur la batterie)' : '') . ' : ' . $e['_why']);
+					'reason' => 'surplus ' . round($avail) . ' W ≥ ' . round($need) . ' W' . ($isEcs && $ecsMayTake ? ' (prioritaire sur la batterie)' : '') . ' : ' . $e['_why']);
 				$mem['last_start'] = $now;
 				$started = true;
 			} else {
 				$wantsPending = true;
-				$waiting[] = $e['name'] . ' attend : surplus ' . round($avail) . ' W < ' . round($need) . ' W' . ($settled ? '' : ' (stabilisation)');
+				if (!$hot && ($avail + (float) $mem['hoy_hidden']) >= $need) {
+					$absorbPending = true;
+				}
+				$why = $e['name'] . ' attend : surplus ' . round($avail) . ' W < ' . round($need) . ' W' . ($settled ? '' : ' (stabilisation)');
+				if ($isEcs && !$ecsMayTake) {
+					$why .= ' — réserve de nuit : SOC projeté ' . round($projected) . ' % < ' . round($cfg['night_reserve']) . ' % (le ballon n\'utilise que l\'injection ou l\'heure creuse EDF)';
+				}
+				$waiting[] = $why;
 			}
 		}
 
@@ -235,27 +284,43 @@ class energyManagerEngine {
 		$newHoy = $hoyLimit;
 		$reasonHoy = '';
 		$critical = $injection >= $cfg['inj_critical'];
-		if ($critical && !$started && !$teslaHolds) {
+		// Quelque chose peut-il absorber de la production ? (Tesla branchée en mode solaire avec de la place, consommateur qui démarre ou
+		// démarrerait avec la production non bridée, batterie qui peut encore charger.) Sinon, et seulement sinon, on bride.
+		$teslaCan = $teslaSolar && $teslaRoom && !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
+		$loadCan = $started || $absorbPending || $teslaCan;
+		$battLimit = min($newCharge, $cfg['charge_max']);
+		$battRoom = ($battLimit >= 100) && ($soc < 98) && (($battLimit - $battCharge) >= max(500, (float) $mem['hoy_hidden'] + 100));
+		$forceWrite = false;
+		if ($critical && !$loadCan) {
 			// aucun consommateur ne peut absorber : on bride la production pour ne pas injecter
 			$newHoy = max(0, min($hoyLimit, $pv) - $injection + 50);
 			$reasonHoy = 'injection ' . round($injection) . ' W non absorbable : limitation à ' . round($newHoy) . ' W';
+			$mem['hoy_hidden'] = max((float) $mem['hoy_hidden'], max(0, $injection - 50));
 		} elseif ($hoyLimit < $cfg['hoy_max']) {
 			if (!$daytime) {
 				$newHoy = $cfg['hoy_max'];
 				$reasonHoy = 'plus de soleil : limite remise au maximum';
-			} elseif ($import > 0) {
-				$newHoy = min($cfg['hoy_max'], $hoyLimit + max($cfg['hoy_step_up'], $import));
-				$reasonHoy = 'soutirage EDF : on relève la limite';
+			} elseif ($loadCan || $import > 0) {
+				// une charge arrive : la limite revient IMMÉDIATEMENT au maximum
+				$newHoy = $cfg['hoy_max'];
+				$reasonHoy = ($import > 0 ? 'soutirage EDF' : 'une charge peut absorber la production') . ' : limite remise au maximum';
+				$forceWrite = true;
+			} elseif ($battRoom) {
+				$newHoy = $cfg['hoy_max'];
+				$reasonHoy = 'la batterie peut de nouveau absorber : limite remise au maximum';
 			} elseif ($injection < 100 && $pv >= 0.9 * $hoyLimit) {
 				$newHoy = min($cfg['hoy_max'], $hoyLimit + $cfg['hoy_step_up']);
 				$reasonHoy = 'limite atteinte sans injection : on relève la limite';
 			}
 		}
+		if ($newHoy >= $cfg['hoy_max']) {
+			$mem['hoy_hidden'] = 0;
+		}
 		$newHoy = max(0, min($cfg['hoy_max'], $newHoy));
 		$delta = abs($newHoy - $hoyLimit);
 		$intervalOk = ($now - $mem['last_hoy_write']) >= $cfg['hoy_write_interval'];
 		$isReduction = $newHoy < $hoyLimit;
-		if ($reasonHoy !== '' && $delta >= $cfg['hoy_min_delta'] && ($intervalOk || ($critical && $isReduction))) {
+		if ($reasonHoy !== '' && $delta >= $cfg['hoy_min_delta'] && ($intervalOk || $forceWrite || ($critical && $isReduction))) {
 			$out['actions'][] = array('type' => 'hoymiles', 'value' => round($newHoy), 'reason' => $reasonHoy);
 			$mem['last_hoy_write'] = $now;
 		}
@@ -270,6 +335,20 @@ class energyManagerEngine {
 				'message' => 'Injection ' . round($injection) . ' W : maximum légal (' . $cfg['inj_legal'] . ' W) atteint !');
 		}
 
+		// échéance du ballon : température nominale non atteinte à l'heure limite => OFF (voir wants) + alerte Discord, une fois par jour
+		foreach ($equips as $e) {
+			if ($e['type'] !== 'ecs' || $e['mode'] !== 'auto' || !empty($e['done_today']) || !empty($e['force_edf'])) {
+				continue;
+			}
+			$wt = (isset($e['water_temp']) && $e['water_temp'] !== null) ? $e['water_temp'] : null;
+			$coldNow = ($wt === null) || ($wt < (isset($e['min_temp']) ? $e['min_temp'] : 52));
+			if ($coldNow && $minuteNow >= $cfg['ecs_deadline'] && $minuteNow < $cfg['ecs_deadline'] + 120) {
+				$out['alerts'][] = array('key' => 'ecs_deadline_' . $e['id'], 'level' => 'critical', 'once' => true,
+					'message' => 'Ballon « ' . $e['name'] . ' » : température nominale non atteinte à ' . self::hm($cfg['ecs_deadline'])
+						. ' (eau à ' . ($wt === null ? '?' : round($wt, 1)) . ' °C). Il est mis sur OFF.');
+			}
+		}
+
 		/* ---------- 7. Informations de synthèse ---------- */
 		$out['info'] = array(
 			'injection' => round($injection),
@@ -277,9 +356,11 @@ class energyManagerEngine {
 			'daytime'   => $daytime ? 1 : 0,
 			'tesla_solar' => $teslaSolar ? 1 : 0,
 			'tesla_holds' => $teslaHolds ? 1 : 0,
+			'ecs_may_take' => $ecsMayTake ? 1 : 0,
+			'night_projected' => round($projected),
 			'wants_pending' => $wantsPending ? 1 : 0,
 			'decision'  => count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)' . (count($waiting) ? ' — ' . implode(' ; ', $waiting) : ''),
-				'waiting'   => $waiting,
+			'waiting'   => $waiting,
 		);
 		$out['mem'] = $mem;
 		return $out;
@@ -309,7 +390,11 @@ class energyManagerEngine {
 			$water = isset($e['water_temp']) ? $e['water_temp'] : null;
 			$minT = isset($e['min_temp']) ? $e['min_temp'] : 52;
 			$cold = ($water === null) || ($water < $minT);
-			// surplus solaire réellement mobilisable (injection + charge batterie + Tesla), calculé par decide()
+			// échéance : température nominale non atteinte à l'heure limite => on arrête (et decide() alerte)
+			if ($cold && isset($s['minute']) && (int) $s['minute'] >= $cfg['ecs_deadline']) {
+				return $no('ballon : température nominale non atteinte à ' . self::hm($cfg['ecs_deadline']) . ', passage sur OFF');
+			}
+			// surplus solaire que le ballon peut réclamer (batterie et Tesla comprises si la réserve de nuit le permet), calculé par decide()
 			$pot = isset($s['_potential']) ? (float) $s['_potential'] : 0.0;
 			$solarEnough = $daytime && $pot >= $e['power_theo'] * $cfg['start_ratio'];
 			$running = !empty($e['is_on']);
@@ -343,6 +428,10 @@ class energyManagerEngine {
 				'why' => 'pièce à ' . $e['temp'] . ' °C < ' . $limit . ' °C (consigne ' . $e['target'] . ' + boost solaire)');
 		}
 		return $no('pièce à ' . $e['temp'] . ' °C ≥ ' . $limit . ' °C');
+	}
+
+	private static function hm($_minute) {
+		return sprintf('%02dh%02d', floor($_minute / 60), $_minute % 60);
 	}
 
 	private static function alreadyOff(array $actions, $id) {

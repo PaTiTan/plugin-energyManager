@@ -76,3 +76,4 @@
 #emSim .ems-log .alert { color: #ff7b72; font-weight: bold; }
 #emSim .ems-log .info { color: #8fb0c4; }
 #emSim .ems-log .err { color: #f0ad4e; }
+#emSim .ems-decision:empty { display: none; }

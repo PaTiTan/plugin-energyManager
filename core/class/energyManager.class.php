@@ -170,6 +170,8 @@ class energyManager extends eqLogic {
 			}
 		}
 		$active = ((int) self::cfg('active', 1) === 1);
+		$fc = self::readCmd(self::cfg('cmd_forecast_kwh'));
+		$state['forecast_kwh'] = ($fc !== null && is_numeric($fc['value'])) ? (float) $fc['value'] : null;
 		$hoy = self::readCmd(self::cfg('cmd_hoy_limit_fb'));
 		$chg = self::readCmd(self::cfg('cmd_charge_limit_fb'));
 		$state['hoy_limit'] = ($hoy !== null && is_numeric($hoy['value'])) ? (float) $hoy['value'] : (float) $state['cfg']['hoy_max'];
@@ -239,6 +241,12 @@ class energyManager extends eqLogic {
 			'imp_off' => (float) self::cfg('imp_off', 150),
 			'min_pv' => (float) self::cfg('min_pv', 300),
 			'tesla_priority' => self::cfg('tesla_priority', 'tesla'),
+			'night_reserve' => (float) self::cfg('night_reserve', 50),
+			'ecs_deadline' => (float) self::cfg('ecs_deadline', 16) * 60,
+			'ecs_absorb_temp' => (float) self::cfg('ecs_absorb_temp', 50),
+			'evening' => (float) self::cfg('evening_hour', 19) * 60,
+			'talon' => (float) self::cfg('talon', 400),
+			'batt_kwh' => (float) self::cfg('batt_kwh', 16),
 		);
 	}
 
@@ -539,6 +547,15 @@ class energyManager extends eqLogic {
 		$active = array();
 		foreach ($_alerts as $al) {
 			$active[$al['key']] = true;
+			if (!empty($al['once'])) {
+				// alerte unique par jour (ex. ballon non chaud à l'échéance) : pas de boucle
+				$k = 'energyManager::once::' . $al['key'];
+				if (cache::byKey($k)->getValue('') !== date('Ymd')) {
+					cache::set($k, date('Ymd'));
+					self::notify($al['level'], $al['message']);
+				}
+				continue;
+			}
 			self::sendAlert($al['key'], $al['level'], $al['message'], $_now);
 		}
 		foreach (array('stale', 'incoherent', 'injection', 'injection_legal') as $k) {
@@ -558,6 +575,15 @@ class energyManager extends eqLogic {
 		self::notify($_level, $_message);
 	}
 
+	/** Mention Discord de l'utilisateur : accepte l'identifiant seul ou la forme <@identifiant>. */
+	public static function discordMention() {
+		$v = trim((string) self::cfg('discord_user_id', ''));
+		if (preg_match('/(\d{5,})/', $v, $m)) {
+			return '<@' . $m[1] . '>';
+		}
+		return '';
+	}
+
 	/** Message Jeedom + webhook Discord d'urgence. */
 	public static function notify($_level, $_message) {
 		log::add('energyManager', $_level === 'critical' ? 'error' : 'warning', $_message);
@@ -566,7 +592,8 @@ class energyManager extends eqLogic {
 		if ($hook === '' || strpos($hook, 'https://discord.com/api/webhooks/') !== 0) {
 			return;
 		}
-		$payload = json_encode(array('content' => ($_level === 'critical' ? '🚨 ' : '⚠️ ') . '**Energy Manager** : ' . $_message));
+		$mention = self::discordMention();
+		$payload = json_encode(array('content' => ($_level === 'critical' ? '🚨 ' . ($mention !== '' ? $mention . ' ' : '') : '⚠️ ') . '**Energy Manager** : ' . $_message));
 		$ch = curl_init($hook);
 		curl_setopt_array($ch, array(
 			CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_RETURNTRANSFER => true,
@@ -603,6 +630,7 @@ class energyManager extends eqLogic {
 			$main->checkAndUpdateCmd('injection', $_result['info']['injection']);
 		}
 		$main->checkAndUpdateCmd('active_info', (int) self::cfg('active', 1));
+		$main->checkAndUpdateCmd('reserve_info', (float) self::cfg('night_reserve', 50));
 		foreach ($_state['all_equips'] as $e) {
 			$eq = eqLogic::byId($e['id']);
 			if (!is_object($eq)) {
@@ -653,7 +681,7 @@ class energyManager extends eqLogic {
 				array('pv', 'Production PV', 'W'), array('grid', 'Réseau', 'W'), array('batt', 'Batterie', 'W'),
 				array('soc', 'SOC batterie', '%'), array('house', 'Maison', 'W'), array('injection', 'Injection', 'W'),
 				array('hoy_limit', 'Limite Hoymiles', 'W'), array('charge_limit', 'Limite charge batterie', 'W'),
-				array('active_info', 'Pilotage actif', ''),
+				array('active_info', 'Pilotage actif', ''), array('reserve_info', 'Réserve de nuit', '%'),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'info', 'numeric', $c[2]);
 			}
@@ -673,6 +701,12 @@ class energyManager extends eqLogic {
 				$this->createCmd($c[0], $c[1], 'action', 'other');
 			}
 			$this->createCmd('ecs_answer', 'Réponse ballon (ask)', 'action', 'message');
+			$rs = $this->createCmd('reserve_set', 'Définir la réserve de nuit', 'action', 'slider');
+			if ($rs->getConfiguration('minValue', '') === '') {
+				$rs->setConfiguration('minValue', 0);
+				$rs->setConfiguration('maxValue', 100);
+				$rs->save();
+			}
 			return;
 		}
 		$this->createCmd('power', 'Puissance', 'info', 'numeric', 'W');
@@ -726,7 +760,7 @@ class energyManager extends eqLogic {
 		$version = jeedom::versionAlias($_version);
 		foreach (array('pv', 'grid', 'batt', 'soc', 'house', 'injection', 'hoy_limit', 'charge_limit', 'decision', 'sim_info',
 			'tesla_priority_info', 'batt_target_info', 'slot', 'season', 'prio_tesla', 'prio_battery', 'target_95', 'target_100',
-			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off') as $l) {
+			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set') as $l) {
 			$c = $this->getCmd(null, $l);
 			$replace['#' . $l . '_id#'] = is_object($c) ? $c->getId() : 0;
 			$replace['#' . $l . '_val#'] = is_object($c) ? addslashes((string) $c->execCmd()) : '';
@@ -783,6 +817,12 @@ class energyManagerCmd extends cmd {
 				case 'target_100':   config::save('batt_target', 100, 'energyManager'); break;
 				case 'sim_on':       config::save('simulation', 1, 'energyManager'); break;
 				case 'sim_off':      config::save('simulation', 0, 'energyManager'); break;
+				case 'reserve_set':
+					$v = isset($_options['slider']) ? (float) $_options['slider'] : (float) energyManager::cfg('night_reserve', 50);
+					$v = max(0, min(100, round($v)));
+					config::save('night_reserve', $v, 'energyManager');
+					$eq->checkAndUpdateCmd('reserve_info', $v);
+					break;
 				case 'active_on':
 					config::save('active', 1, 'energyManager');
 					$eq->checkAndUpdateCmd('active_info', 1);

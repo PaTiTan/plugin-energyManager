@@ -81,10 +81,24 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 			<label class="col-md-4 control-label">{{Webhook Discord d'urgence}}</label>
 			<div class="col-md-6"><input class="configKey form-control" data-l1key="discord_webhook" placeholder="https://discord.com/api/webhooks/..."/></div>
 		</div>
+		<div class="form-group">
+			<label class="col-md-4 control-label">{{Votre identifiant Discord (mention)}}
+				<sup><i class="fas fa-question-circle tooltips" title="{{Les alertes critiques vous mentionnent. Saisissez l'identifiant seul ou la forme <@identifiant>.}}"></i></sup>
+			</label>
+			<div class="col-md-4"><input class="configKey form-control" data-l1key="discord_user_id" placeholder="<@330819841735000065>"/></div>
+		</div>
 		<?php em_cmd_row('cmd_ask', '{{Commande de message avec "ask" (plugin Discord)}}', 'action', '{{Utilisée pour demander s\'il faut compléter le ballon avec EDF.}}'); ?>
 		<?php em_val_row('alert_repeat', '{{Répétition des alertes}}', '300', '{{Une alerte est renvoyée en boucle tant que le problème persiste.}}', 's'); ?>
 		<?php em_val_row('inj_critical', '{{Injection critique}}', '500', '', 'W'); ?>
 		<?php em_val_row('inj_legal', '{{Injection maximale légale}}', '3000', '', 'W'); ?>
+
+		<legend><i class="fas fa-moon"></i> {{Batterie : réserve de nuit et ballon}}</legend>
+		<?php em_val_row('night_reserve', '{{Réserve de nuit (SOC à laisser au soir)}}', '50', '{{Aussi réglable avec la jauge du widget. Le ballon ne passe avant la batterie que si le SOC projeté au soir reste au-dessus.}}', '%'); ?>
+		<?php em_val_row('evening_hour', '{{Heure du « soir »}}', '19', '{{Heure à laquelle la production passe sous le talon de la maison.}}', 'h'); ?>
+		<?php em_val_row('talon', '{{Talon de la maison}}', '400', '{{Consommation de base, utilisée pour projeter le SOC du soir avec la prévision solaire.}}', 'W'); ?>
+		<?php em_val_row('batt_kwh', '{{Capacité de la batterie}}', '16', '', 'kWh'); ?>
+		<?php em_val_row('ecs_deadline', '{{Heure limite du ballon}}', '16', '{{Si le ballon n'a pas atteint la température de son thermostat à cette heure, il est mis sur OFF et une alerte Discord est envoyée.}}', 'h'); ?>
+		<?php em_val_row('ecs_absorb_temp', '{{Température au-delà de laquelle le ballon n'absorbe plus}}', '50', '{{Sert à décider de laisser la limite Hoymiles au maximum.}}', '°C'); ?>
 
 		<legend><i class="fas fa-solar-panel"></i> {{Mesures}}</legend>
 		<?php em_cmd_row('cmd_grid', '{{Puissance réseau (signée)}}', 'info', '{{Positif = soutirage EDF, négatif = injection.}}'); ?>

@@ -63,12 +63,14 @@ if (!isConnect('admin')) {
 				</div>
 				<div class="ems-ctl">
 					<label><input type="checkbox" id="ems-auto"/> {{Courbe solaire de la journée (le curseur ☀ donne le pic à 13 h)}}</label>
+					<label><input type="checkbox" id="ems-forecast"/> {{Utiliser la prévision solaire restante (jauge 🔮)}}</label>
 					<label><input type="checkbox" id="ems-heat" checked/> {{Saison de chauffe}}</label>
 					<label><input type="checkbox" id="ems-stale"/> {{Simuler une panne de mesure (donnée obsolète)}}</label>
 				</div>
 			</div>
 
 			<div class="ems-decision" id="ems-decision">{{En attente du premier cycle…}}</div>
+			<div class="ems-decision" id="ems-night" style="border-left-color:#8e7cc3"></div>
 			<div class="ems-logtitle"><i class="fas fa-stream"></i> {{Décisions et messages du plugin (temps simulé)}}</div>
 			<div class="ems-log" id="ems-log"></div>
 		</div>

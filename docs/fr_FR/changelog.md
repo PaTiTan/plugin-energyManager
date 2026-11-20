@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- **Réserve de nuit** : une jauge (widget et simulateur) indique le SOC que la batterie doit encore avoir au soir, quand la production passe sous le talon de la maison. Le ballon ne passe avant la batterie que si le SOC projeté au soir reste au-dessus (avec la prévision solaire restante si elle est configurée, sinon avec le SOC actuel). Sinon il n'utilise que l'injection réelle ou l'heure creuse EDF, et il est coupé si la batterie se décharge pour lui.
+- **Échéance du ballon** : s'il n'a pas atteint la température de son thermostat à l'heure limite (16 h par défaut), il est mis sur OFF et une alerte Discord est envoyée une seule fois par jour. La réponse « Compléter avec EDF » reste possible ensuite.
+- **Mention Discord** : nouveau champ « Votre identifiant Discord » ; les alertes critiques vous mentionnent.
+- **Limite Hoymiles** : elle reste au maximum tant que quelque chose peut absorber la production (Tesla en mode solaire, consommateur qui démarre ou démarrerait, batterie qui peut charger, ballon sous 50 °C). Elle n'est réduite que s'il n'y a plus rien à alimenter, et revient **immédiatement** au maximum dès qu'une charge arrive.
+- Simulateur : jauges « réserve de nuit » et « prévision solaire restante », indication du SOC projeté.
+
 ## 0.3.2
 
 - Correctif : la puissance théorique et la puissance mesurée d'un ballon ou d'un radiateur n'étaient pas enregistrées (les champs de la Tesla utilisaient les mêmes clés et écrasaient la valeur à la sauvegarde). La Tesla a maintenant ses propres champs ; ses anciennes valeurs sont reprises. **Ressaisir la puissance théorique des ballons et radiateurs après la mise à jour.**

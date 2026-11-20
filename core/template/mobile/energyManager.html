@@ -63,6 +63,8 @@
 			<span>Cible :</span>
 			<a class="btn btn-xs btn-default" id="b95-#uid#">95 %</a>
 			<a class="btn btn-xs btn-default" id="b100-#uid#">100 %</a>
+			<span title="SOC que la batterie doit encore avoir au soir, quand la production passe sous le talon">Réserve nuit :</span>
+			<input type="range" min="0" max="100" step="5" id="rsv-#uid#" style="width:110px"/> <b id="rsvv-#uid#"></b>
 			<span>Simulation :</span>
 			<a class="btn btn-xs btn-default" id="bson-#uid#">ON</a>
 			<a class="btn btn-xs btn-default" id="bsoff-#uid#">OFF</a>
@@ -73,7 +75,7 @@
 		(function () {
 			var uid = '#uid#'
 			var V = { pv: '#pv_val#', grid: '#grid_val#', batt: '#batt_val#', soc: '#soc_val#', house: '#house_val#', inj: '#injection_val#',
-				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#' }
+				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#', rsv: '#reserve_info_val#' }
 			var consumers = #consumers#
 			var el = function (id) { return document.getElementById(id + '-' + uid) }
 			var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n }
@@ -99,6 +101,8 @@
 				mark('bpt', V.prio === 'tesla'); mark('bpb', V.prio === 'battery')
 				mark('b95', String(V.tgt) === '95'); mark('b100', String(V.tgt) === '100')
 				mark('bson', String(V.sim) === '1'); mark('bsoff', String(V.sim) !== '1')
+				var rs = el('rsv'); if (document.activeElement !== rs) { rs.value = num(V.rsv) }
+				el('rsvv').textContent = Math.round(num(V.rsv)) + ' %'
 				var activeOn = (String(V.act) !== '0')
 				el('led').className = 'led ' + (activeOn ? 'g' : 'r')
 				el('ledtxt').textContent = activeOn ? 'Pilotage actif' : 'Pilotage désactivé : rien n\'est commandé'
@@ -115,7 +119,7 @@
 			}
 			bind('#pv_id#', 'pv'); bind('#grid_id#', 'grid'); bind('#batt_id#', 'batt'); bind('#soc_id#', 'soc')
 			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#charge_limit_id#', 'chg')
-			bind('#active_info_id#', 'act'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
+			bind('#active_info_id#', 'act'); bind('#reserve_info_id#', 'rsv'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
 			consumers.forEach(function (c, i) {
 				if (c.power_id) { jeedom.cmd.update[c.power_id] = function (o) { consumers[i].power = num(o.display_value); render() } }
 				if (c.piloted_id) { jeedom.cmd.update[c.piloted_id] = function (o) { consumers[i].piloted = (String(o.display_value) !== '0') ? 1 : 0; render() } }
@@ -124,6 +128,7 @@
 			var act = function (id, cmdId) { el(id).onclick = function () { jeedom.cmd.execute({ id: cmdId }) } }
 			act('bpt', '#prio_tesla_id#'); act('bpb', '#prio_battery_id#'); act('b95', '#target_95_id#'); act('b100', '#target_100_id#')
 			act('bson', '#sim_on_id#'); act('bsoff', '#sim_off_id#')
+			el('rsv').onchange = function () { V.rsv = this.value; render(); jeedom.cmd.execute({ id: '#reserve_set_id#', value: { slider: this.value } }) }
 			el('led').onclick = function () { jeedom.cmd.execute({ id: (String(V.act) !== '0') ? '#active_off_id#' : '#active_on_id#' }) }
 			document.getElementById('cons-' + uid).onclick = function (ev) {
 				var t = ev.target

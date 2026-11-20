@@ -115,6 +115,10 @@
     makeGauge('right', { label: '🌡 Température des pièces', min: 5, max: 28, step: 0.5, unit: ' °C', color: '#d9534f',
       get: function () { return avg(byType('simple'), 'temp') },
       set: function (v) { byType('simple').forEach(function (e) { e.temp = v }) } })
+    makeGauge('right', { label: '🌙 Réserve de nuit : SOC à laisser au soir', min: 0, max: 100, step: 5, unit: ' %', color: '#8e7cc3',
+      get: function () { return S.reserve }, set: function (v) { S.reserve = v } })
+    makeGauge('right', { label: '🔮 Prévision solaire restante (si cochée)', min: 0, max: 40, step: 1, unit: ' kWh', color: '#f5d76e',
+      get: function () { return S.forecast }, set: function (v) { S.forecast = v } })
     gauges.forEach(refresh)
   }
 
@@ -203,7 +207,8 @@
     inflight = true
     var state = {
       now: Math.floor(S.t), minute: minuteOf(S.t), grid: S.grid, pv: S.pv, soc: S.soc, batt: S.batt, house: S.house,
-      stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio }, hoy_limit: S.hoy, charge_limit: S.chg,
+      stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio, night_reserve: S.reserve }, hoy_limit: S.hoy, charge_limit: S.chg,
+      forecast_kwh: S.useForecast ? S.forecast : null,
       equips: S.equips, mem: S.mem
     }
     call('sim_step', { state: JSON.stringify(state) }, function (res) {
@@ -213,6 +218,7 @@
       S.slot = res.slot
       S.decision = (r.info && r.info.decision) ? r.info.decision : ''
       S.decisionAlert = r.alerts.length > 0
+      S.night = r.info && r.info.night_projected !== undefined ? { proj: r.info.night_projected, may: r.info.ecs_may_take === 1 } : null
       r.actions.forEach(function (a) {
         log('act', describe(a))
         if (a.type === 'equip') {
@@ -277,6 +283,10 @@
     var d = el('decision')
     d.textContent = S.decision || 'En attente du premier cycle…'
     d.className = 'ems-decision' + (S.decisionAlert ? ' alert' : '')
+    el('night').textContent = S.night
+      ? 'Réserve de nuit : SOC projeté au soir ' + S.night.proj + ' % (réserve demandée ' + Math.round(S.reserve) + ' %) → le ballon '
+        + (S.night.may ? 'PEUT passer avant la batterie' : 'ne passe PAS avant la batterie : injection réelle ou heure creuse EDF seulement')
+      : ''
 
     var html = ''
     S.equips.forEach(function (e, i) {
@@ -311,13 +321,14 @@
       pvAvail: 4000, talon: 500, soc: 60, auto: false, stale: false, active: true, running: true, speed: num($('#ems-speed').val()) || 10,
       cfg: init.cfg, hoy: num(init.cfg.hoy_max), chg: num(init.cfg.charge_max),
       prio: init.tesla_priority === 'battery' ? 'battery' : 'tesla', target: init.batt_target === 95 ? 95 : 100,
+      reserve: num(init.cfg.night_reserve), forecast: 10, useForecast: false, night: null,
       equips: init.equips, mem: {}, since: CYCLE, slot: 'HP', decision: '', decisionAlert: false, day: null,
       pv: 0, pvA: 0, grid: 0, batt: 0, house: 0, dragTime: false
     }
     S.equips.forEach(function (e) { if (e.piloted === undefined) { e.piloted = true } })
     logs = []; alertLast = {}
     $('#ems-demo').toggle(!!init.demo)
-    $('#ems-auto').prop('checked', false); $('#ems-stale').prop('checked', false); $('#ems-heat').prop('checked', true)
+    $('#ems-forecast').prop('checked', false); $('#ems-auto').prop('checked', false); $('#ems-stale').prop('checked', false); $('#ems-heat').prop('checked', true)
     if (!bound) { bound = true; bind() }
     buildGauges()
     log('info', 'Simulation démarrée à ' + clockText(S.t) + ' — ' + S.equips.length + ' équipement(s)' + (init.demo ? ' de démonstration' : ' (configuration réelle du plugin)') + '. Aucun ordre n\'est envoyé.')
@@ -351,6 +362,7 @@
     $('#ems-b95').on('click', function () { S.target = 95; log('info', 'Cible batterie : 95 %'); render() })
     $('#ems-b100').on('click', function () { S.target = 100; log('info', 'Cible batterie : 100 %'); render() })
     $('#ems-auto').on('change', function () { S.auto = $(this).is(':checked') })
+    $('#ems-forecast').on('change', function () { S.useForecast = $(this).is(':checked'); S.since = CYCLE })
     $('#ems-stale').on('change', function () { S.stale = $(this).is(':checked'); log('info', S.stale ? 'Panne de mesure simulée' : 'Mesure rétablie'); S.since = CYCLE })
     $('#ems-heat').on('change', function () {
       var on = $(this).is(':checked')
