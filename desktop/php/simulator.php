@@ -48,7 +48,7 @@ if (!isConnect('admin')) {
 					<g class="node" transform="translate(210,105)"><rect width="140" height="40"/><text class="lbl" x="70" y="16">MULTIPLUS II</text><text id="ems-inj" x="70" y="33" style="font-size:12px">injection 0 W</text></g>
 					<g class="node house" transform="translate(440,95)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">🏠 MAISON</text><text class="val" id="ems-house" x="55" y="45">-- W</text></g>
 					<g class="node bat" transform="translate(10,175)"><rect width="200" height="60"/><text class="lbl" x="100" y="18">🔋 BATTERIE 16 kWh</text><text class="val" id="ems-bat" x="100" y="45">-- % · -- W</text></g>
-					<g class="node" transform="translate(300,175)"><rect width="250" height="60"/><text class="lbl" x="125" y="18">LIMITES</text><text id="ems-lim" x="125" y="45" style="font-size:11px">Hoymiles -- · charge --</text></g>
+					<g class="node" transform="translate(300,175)"><rect width="250" height="60"/><text class="lbl" x="125" y="16">LIMITES</text><text id="ems-lim" x="125" y="34" style="font-size:12px">Hoymiles -- · charge --</text><text id="ems-lim2" x="125" y="51" style="font-size:12px">onduleur --</text></g>
 				</svg>
 
 				<div class="ems-cons" id="ems-cons"></div>

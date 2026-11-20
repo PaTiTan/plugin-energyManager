@@ -260,6 +260,72 @@ class energyManager extends eqLogic {
 		return $out;
 	}
 
+	/* ************ Équipement que l'on cesse (ou recommence) de piloter ************ */
+
+	/**
+	 * Un équipement passe en « non piloté » : on l'éteint proprement avant de le laisser tranquille.
+	 *  - radiateur, ballon : commande OFF ;
+	 *  - Tesla : « Stand-By » (qui arrête la charge en cours) puis « Non actif » (teslasmartcharge ne fait plus rien) ;
+	 *  - climatisation : prévu avec le pilotage de la clim.
+	 * En simulation, rien n'est envoyé (l'intention est seulement journalisée).
+	 */
+	public static function releaseEquipment($_eq) {
+		$type = $_eq->getConfiguration('eqType');
+		$name = $_eq->getName();
+		$sim = ((int) self::cfg('simulation', 1) === 1);
+		try {
+			if ($type === 'tesla') {
+				$mc = self::resolveCmd($_eq->getConfiguration('cmd_set_mode'));
+				if ($mc === null) {
+					log::add('energyManager', 'warning', $name . ' : commande set_mode introuvable, la Tesla n\'a pas pu être mise sur Non actif.');
+					return;
+				}
+				if ($sim) {
+					log::add('energyManager', 'info', '[SIMULATION] ' . $name . ' non piloté : Stand-By (arrêt de la charge) puis Non actif.');
+					return;
+				}
+				$mc->execCmd(array('select' => 'Stand-By'));
+				$mc->execCmd(array('select' => 'Non actif'));
+				$_eq->checkAndUpdateCmd('mode_info', 'Non actif');
+				cache::set('energyManager::tesla_plug_handled::' . $_eq->getId(), 0);
+				log::add('energyManager', 'info', $name . ' non piloté : charge arrêtée, teslasmartcharge sur Non actif.');
+			} elseif ($type === 'simple' || $type === 'ecs') {
+				$off = self::resolveCmd($_eq->getConfiguration('cmd_off'));
+				if ($off === null) {
+					log::add('energyManager', 'warning', $name . ' : commande OFF introuvable, l\'équipement n\'a pas pu être éteint.');
+					return;
+				}
+				if ($sim) {
+					log::add('energyManager', 'info', '[SIMULATION] ' . $name . ' non piloté : mise à OFF.');
+					return;
+				}
+				$off->execCmd();
+				log::add('energyManager', 'info', $name . ' non piloté : mis à OFF.');
+			}
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Extinction de ' . $name . ' : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+		}
+	}
+
+	/** Un équipement redevient piloté : une Tesla laissée sur « Non actif » repasse en Stand-By (le passage en Solaire est repris au branchement). */
+	public static function engageEquipment($_eq) {
+		if ($_eq->getConfiguration('eqType') !== 'tesla' || ((int) self::cfg('simulation', 1) === 1)) {
+			return;
+		}
+		try {
+			$m = self::readCmd($_eq->getConfiguration('cmd_mode_info'));
+			$mc = self::resolveCmd($_eq->getConfiguration('cmd_set_mode'));
+			if ($m !== null && $mc !== null && (string) $m['value'] === 'Non actif') {
+				$mc->execCmd(array('select' => 'Stand-By'));
+				$_eq->checkAndUpdateCmd('mode_info', 'Stand-By');
+				cache::set('energyManager::tesla_plug_handled::' . $_eq->getId(), 0);
+				log::add('energyManager', 'info', $_eq->getName() . ' de nouveau piloté : teslasmartcharge repasse en Stand-By.');
+			}
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Remise en service de ' . $_eq->getName() . ' : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+		}
+	}
+
 	/* ******************** Réserve de nuit apprise ******************** */
 
 	/** Historique des consommations de nuit (kWh), texte "5.2;4.8;..." (jamais du JSON : Jeedom le décoderait). */
@@ -1136,6 +1202,11 @@ class energyManagerCmd extends cmd {
 			$eq->setConfiguration('piloted', ($id === 'pilot_on') ? 1 : 0);
 			$eq->save(true);
 			$eq->checkAndUpdateCmd('piloted_info', ($id === 'pilot_on') ? 1 : 0);
+			if ($id === 'pilot_off') {
+				energyManager::releaseEquipment($eq);
+			} else {
+				energyManager::engageEquipment($eq);
+			}
 			return;
 		}
 		if ($id === 'force_edf') {

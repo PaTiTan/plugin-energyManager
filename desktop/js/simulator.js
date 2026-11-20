@@ -300,7 +300,8 @@
     el('house').textContent = W(S.house)
     el('bat').textContent = Math.round(S.soc) + ' % · ' + W(S.batt)
     el('inj').textContent = 'injection ' + W(Math.max(0, -S.grid))
-    el('lim').textContent = 'Hoymiles ' + W(S.hoy) + ' · charge ' + W(S.chg) + ' · onduleur ' + W(S.inv)
+    el('lim').textContent = 'Hoymiles ' + W(S.hoy) + ' · charge ' + W(S.chg)
+    el('lim2').textContent = 'onduleur ' + W(S.inv)
     setFlow('fpv', S.pv, false); setFlow('fgrid', S.grid, false); setFlow('fbat', S.batt, false); setFlow('fhouse', S.house, false)
 
     el('clock').textContent = clockText(S.t)
@@ -413,7 +414,18 @@
     $('#ems-cons').on('click', '[data-act]', function () {
       var a = $(this).data('act'), e = S.equips[parseInt($(this).data('i'), 10)]
       if (!e) { return }
-      if (a === 'led') { e.piloted = !e.piloted; log('info', e.name + (e.piloted ? ' : piloté par le plugin' : ' : non piloté (ignoré)')) }
+      if (a === 'led') {
+        e.piloted = !e.piloted
+        log('info', e.name + (e.piloted ? ' : piloté par le plugin' : ' : non piloté (ignoré)'))
+        if (!e.piloted) {
+          // un équipement qu'on cesse de piloter est éteint proprement
+          if (e.type === 'tesla') { e.tesla_mode = 'Non actif'; log('act', e.name + ' → Stand-By (arrêt de la charge) puis Non actif : plus piloté') }
+          else { e.is_on = false; e.power_real = 0; log('act', e.name + ' → OFF : plus piloté') }
+        } else if (e.type === 'tesla' && e.tesla_mode === 'Non actif') {
+          e.tesla_mode = 'Stand-By'; e.plug_handled = false
+          log('act', e.name + ' → Stand-By : de nouveau piloté')
+        }
+      }
       else if (a === 'mode') { e.mode = String($(this).data('v')); log('info', e.name + ' : mode ' + e.mode) }
       else if (a === 'edf') { e.force_edf = !e.force_edf; log('info', e.name + (e.force_edf ? ' : complément EDF validé (réponse Discord « Oui »)' : ' : complément EDF annulé')) }
       S.since = CYCLE

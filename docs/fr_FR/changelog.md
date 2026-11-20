@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- **Extinction propre d'un équipement que l'on cesse de piloter** (voyant rouge ou commande « Piloté OFF ») : radiateurs et ballon sont mis à OFF ; la Tesla passe en Stand-By (ce qui arrête la charge en cours) puis en « Non actif » (teslasmartcharge ne fait plus rien : sans l'étape Stand-By, la charge en cours aurait continué). Même principe prévu pour la climatisation. Rien n'est envoyé en mode simulation. Quand la Tesla redevient pilotée, elle repasse en Stand-By et energyManager la remet en Solaire au branchement.
+- Widget et simulateur : la case « Limites » est sur deux lignes (le texte débordait).
+
 ## 0.7.3
 
 - Simulateur : la tuile de la Tesla affiche le calcul de teslasmartcharge (surplus = batterie − réseau + voiture, courant visé, mini 2 A / 460 W, délai de confirmation, plafond de puissance maximale, priorité maison). Hausses confirmées en 10 s comme dans teslasmartcharge 1.2.
