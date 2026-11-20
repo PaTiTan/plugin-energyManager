@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0
+
+- **Limite Hoymiles : jamais d'injection au-delà de l'agressivité de la Tesla** (500 / 1000 / 2000 W, plus de bande de tolérance) ; avec la Tesla pas encore en charge, 500 W seulement.
+- **Sans Tesla active (débranchée, Stand-By, pleine, bloquée) : aucune injection** (au-delà de 50 W de tolérance de mesure, la limite est réduite pour la ramener à zéro).
+- **On allume d'abord un consommateur, puis on libère exactement sa puissance** sur la limite, et ainsi de suite ; un consommateur peut démarrer grâce au surplus que la limite avait écrêté. La batterie qui peut absorber davantage voit sa puissance libérée de la même façon. Un soutirage EDF remet toujours la limite au maximum.
+- Les petites réductions respectent toujours l'écriture espacée du curseur (60 s) pour ménager la mémoire flash ; seules les injections de 500 W et plus sont réduites immédiatement.
+
 ## 0.9.0
 
 - **Priorité Tesla** : la batterie ne se charge pas du tout tant que la Tesla est en mode solaire et qu'elle a de la place ; la Tesla prend toute la puissance disponible. Si la Tesla est pleine ou arrêtée, la batterie reprend la charge.
