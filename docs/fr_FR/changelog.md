@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- Simulateur : la tuile de la Tesla affiche le calcul de teslasmartcharge (surplus = batterie − réseau + voiture, courant visé, mini 2 A / 460 W, délai de confirmation, plafond de puissance maximale, priorité maison). Hausses confirmées en 10 s comme dans teslasmartcharge 1.2.
+
 ## 0.7.2
 
 - **Correctif majeur : le plugin se désactivait.** L'interrupteur « Pilotage » enregistrait son état dans la clé de configuration `active`, qui est aussi celle que Jeedom utilise pour l'activation du plugin : passer le pilotage au rouge désactivait tout le plugin (et le démon). L'état du pilotage utilise maintenant la clé `pilot_active` ; au premier démarrage le pilotage est actif.

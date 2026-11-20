@@ -12,7 +12,8 @@
   var WATER_L = 200       // litres
   var TESLA_MIN = 460     // W : 2 A mini
   var TESLA_MAX = 7360    // W : 32 A x 230 V
-  var TESLA_PERIOD = 60   // s : confirmation de teslasmartcharge
+  var TESLA_UP = 10       // s : confirmation d'une hausse (teslasmartcharge 1.2)
+  var TESLA_DOWN = 60     // s : confirmation d'une baisse
   var TESLA_SEUIL = 80    // % : seuil batterie de teslasmartcharge en priorité « maison » (réglage du plugin Tesla)
   var CYCLE = 10          // s : cadence de décision
 
@@ -171,16 +172,23 @@
         var allow = S.batt - S.grid + e.power_real - (e.margin || 0)     // marge de teslasmartcharge : négative = soutirage EDF toléré
         var amps = Math.min(32, Math.floor(allow / 230))
         if (amps < 2) { amps = 0 }
-        var target = Math.min(amps * 230, e.power_theo || TESLA_MAX)
-        if (S.prio === 'battery' && S.soc < TESLA_SEUIL) { target = 0 }
-        if (S.batt < -50 && target < e.power_real) { e.power_real = target; e._t = 0; e._dir = 0 }   // urgence : la maison se vide
-        else if (target === e.power_real) { e._t = 0; e._dir = 0 }
+        var cap = e.power_theo || TESLA_MAX
+        var target = Math.min(amps * 230, cap)
+        var why = 'surplus ' + Math.round(allow) + ' W (batterie ' + Math.round(S.batt) + ' − réseau ' + Math.round(S.grid) + ' + voiture ' + Math.round(e.power_real) + ')'
+        if (amps === 0) { why += ' < ' + TESLA_MIN + ' W (2 A mini) : pas de charge' }
+        else { why += ' → ' + amps + ' A' + (amps * 230 > cap ? ' (plafonné à la puissance maximale ' + Math.round(cap) + ' W)' : '') }
+        if (S.prio === 'battery' && S.soc < TESLA_SEUIL) { target = 0; why = 'priorité maison : la voiture attend que le SOC (' + Math.round(S.soc) + ' %) dépasse ' + TESLA_SEUIL + ' %' }
+        if (S.batt < -50 && target < e.power_real) { e.power_real = target; e._t = 0; e._dir = 0; why += ' · coupure immédiate (la maison se vide)' }
+        else if (target === e.power_real) { e._t = 0; e._dir = 0; why += ' · stable' }
         else {
           var dir = target > e.power_real ? 1 : -1
+          var delay = dir === 1 ? TESLA_UP : TESLA_DOWN        // hausses confirmées 10 s, baisses 60 s (teslasmartcharge 1.2)
           if (dir !== e._dir) { e._dir = dir; e._t = 0 }
           e._t += dt
-          if (e._t >= TESLA_PERIOD) { e.power_real = target; e._t = 0; e._dir = 0 }
+          why += ' · ' + (dir === 1 ? 'hausse' : 'baisse') + ' vers ' + Math.round(target) + ' W dans ' + Math.max(0, Math.round(delay - e._t)) + ' s'
+          if (e._t >= delay) { e.power_real = target; e._t = 0; e._dir = 0 }
         }
+        e._info = why
       }
       e.is_on = e.power_real > 20
     })
@@ -317,7 +325,7 @@
     S.equips.forEach(function (e, i) {
       var st = (e.type === 'ecs') ? 'eau ' + e.water_temp.toFixed(1) + ' °C' + (e.done_today ? ' · terminé' : '')
         : (e.type === 'simple') ? 'pièce ' + e.temp.toFixed(1) + ' °C (cible ' + e.target + ')'
-        : 'teslasmartcharge : ' + e.tesla_mode + (e.plugged ? ' · branchée' : ' · débranchée')
+        : 'teslasmartcharge : ' + e.tesla_mode + (e.plugged ? ' · branchée' : ' · débranchée') + (e.active && e._info ? ' — ' + e._info : '')
       html += '<div class="ems-tile ' + (e.is_on ? 'on' : '') + (e.piloted ? '' : ' unpiloted') + '">'
         + '<span class="ems-led ' + (e.piloted ? 'ems-g' : 'ems-r') + '" data-act="led" data-i="' + i + '" title="Piloté par energyManager : cliquer pour changer"></span>'
         + esc(e.name) + '<b>' + Math.round(e.power_real) + ' W</b>' + (e.is_on ? 'ON' : 'OFF') + '<div class="ems-st">' + esc(st) + '</div>'
