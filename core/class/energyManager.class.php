@@ -251,7 +251,18 @@ class energyManager extends eqLogic {
 			if ($type === 'manager') {
 				continue;
 			}
-			$pr = self::readCmd($eq->getConfiguration('cmd_power'));
+			// la Tesla a ses propres champs (clés distinctes de celles du ballon et des radiateurs, sinon Jeedom écrase l'un par l'autre)
+			$isTesla = ($type === 'tesla');
+			$powerCmd = $eq->getConfiguration($isTesla ? 'tesla_cmd_power' : 'cmd_power');
+			if ($isTesla && trim((string) $powerCmd) === '') {
+				$powerCmd = $eq->getConfiguration('cmd_power');
+			}
+			$theo = $eq->getConfiguration($isTesla ? 'tesla_power_max' : 'power_theo');
+			if ($isTesla && ($theo === '' || $theo === null)) {
+				$theo = $eq->getConfiguration('power_theo');
+			}
+			$theo = (is_numeric($theo) && (float) $theo > 0) ? (float) $theo : ($isTesla ? 3680 : 1000);
+			$pr = self::readCmd($powerCmd);
 			$st = self::readCmd($eq->getConfiguration('cmd_state'));
 			$power = ($pr !== null && is_numeric($pr['value'])) ? (float) $pr['value'] : 0;
 			$zero = (float) $eq->getConfiguration('zero_threshold', 20);
@@ -265,7 +276,7 @@ class energyManager extends eqLogic {
 				'mode' => $eq->getConfiguration('mode', 'auto'),
 				'piloted' => ((int) $eq->getConfiguration('piloted', 1) === 1),
 				'is_on' => $isOn, 'power_real' => $power,
-				'power_theo' => (float) $eq->getConfiguration('power_theo', 1000),
+				'power_theo' => $theo,
 				'priority' => (int) $eq->getConfiguration('priority', 2),
 			);
 			if ($type === 'simple') {

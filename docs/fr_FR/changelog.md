@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Correctif : la puissance théorique et la puissance mesurée d'un ballon ou d'un radiateur n'étaient pas enregistrées (les champs de la Tesla utilisaient les mêmes clés et écrasaient la valeur à la sauvegarde). La Tesla a maintenant ses propres champs ; ses anciennes valeurs sont reprises. **Ressaisir la puissance théorique des ballons et radiateurs après la mise à jour.**
+
 ## 0.3.1
 
 - Ballon : action prioritaire. Il démarre dès que le surplus mobilisable (injection + puissance de charge de la batterie + puissance de la Tesla) atteint 70 % de sa puissance, quel que soit le SOC, sans attendre la batterie ni la Tesla.
