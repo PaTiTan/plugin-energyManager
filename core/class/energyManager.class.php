@@ -142,18 +142,10 @@ class energyManager extends eqLogic {
 		$simulation = $_dry || (int) self::cfg('simulation', 1) === 1;
 
 		$minute = (int) date('G', $now) * 60 + (int) date('i', $now);
-		$slots = energyManagerEngine::parseSlots(self::cfg('hc_slots', ''));
-		$slot = energyManagerEngine::slotAt($slots, $minute);
-		$hcAfternoon = false;
-		$hcAfternoonEnd = null;
-		foreach ($slots as $sl) {
-			if ($sl[2] === 'HC' && $sl[0] >= 720 && $sl[0] < 1080) {
-				$hcAfternoonEnd = $sl[1];
-				if ($minute >= $sl[0] && $minute < $sl[1]) {
-					$hcAfternoon = true;
-				}
-			}
-		}
+		$hcI = self::hcInfo($minute);
+		$slot = $hcI['slot'];
+		$hcAfternoon = $hcI['afternoon'];
+		$hcAfternoonEnd = $hcI['afternoon_end'];
 
 		$state = array(
 			'now' => $now, 'minute' => $minute,
@@ -214,6 +206,24 @@ class energyManager extends eqLogic {
 		self::ecsAsk($state['equips'], $minute, $hcAfternoonEnd);
 		self::handleAlerts($result['alerts'], $now);
 		return $result;
+	}
+
+	/**
+	 * Créneau tarifaire à une minute du jour (0-1439) d'après les plages d'heures creuses configurées.
+	 * @return array slot ('HC'|'HP'), afternoon (bool : en HC d'après-midi), afternoon_end (minute de fin de l'HC d'après-midi ou null)
+	 */
+	public static function hcInfo($_minute) {
+		$slots = energyManagerEngine::parseSlots(self::cfg('hc_slots', ''));
+		$out = array('slot' => energyManagerEngine::slotAt($slots, $_minute), 'afternoon' => false, 'afternoon_end' => null);
+		foreach ($slots as $sl) {
+			if ($sl[2] === 'HC' && $sl[0] >= 720 && $sl[0] < 1080) {
+				$out['afternoon_end'] = $sl[1];
+				if ($_minute >= $sl[0] && $_minute < $sl[1]) {
+					$out['afternoon'] = true;
+				}
+			}
+		}
+		return $out;
 	}
 
 	/** Paramètres du moteur : valeurs du plugin + sélecteurs du widget. */

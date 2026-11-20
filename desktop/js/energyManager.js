@@ -33,46 +33,9 @@ $('body').off('click', '.emEqCmdPick').on('click', '.emEqCmdPick', function () {
   })
 })
 
-/* Simulateur : exécute le moteur sur des valeurs saisies, sans rien envoyer */
+/* Simulateur : page complète (moteur réel, aucun ordre envoyé) */
 $('#bt_emSimulator').off('click').on('click', function () {
-  var html = '<div class="form-horizontal" id="emSim">'
-  var fields = [
-    ['pv', 'Production PV (W)', 4000], ['grid', 'Réseau (W, négatif = injection)', -1200],
-    ['soc', 'SOC batterie (%)', 100], ['hour', 'Heure', 12], ['min', 'Minute', 0],
-    ['hoy_limit', 'Limite Hoymiles actuelle (W)', 7600], ['charge_limit', 'Limite de charge actuelle (W)', 0],
-    ['room_temp', 'Température des pièces (°C)', 18], ['water_temp', 'Température du ballon (°C)', 40]
-  ]
-  fields.forEach(function (f) {
-    html += '<div class="form-group"><label class="col-sm-6 control-label">' + f[1] + '</label>' +
-      '<div class="col-sm-4"><input type="number" step="any" class="form-control" data-sim="' + f[0] + '" value="' + f[2] + '"/></div></div>'
-  })
-  html += '<div class="form-group"><label class="col-sm-6 control-label">Saison de chauffe</label><div class="col-sm-4"><input type="checkbox" data-sim="season_heat" checked/></div></div>'
-  html += '<div class="form-group"><label class="col-sm-6 control-label">Heure creuse d\'après-midi</label><div class="col-sm-4"><input type="checkbox" data-sim="hc_afternoon"/></div></div>'
-  html += '<a class="btn btn-success" id="bt_emSimRun"><i class="fas fa-play"></i> Simuler</a><pre id="emSimOut" style="margin-top:10px;max-height:300px;overflow:auto"></pre></div>'
-  bootbox.dialog({ title: '{{Simulateur de décisions (aucun ordre envoyé)}}', message: html, size: 'large' })
-  $('#bt_emSimRun').on('click', function () {
-    var inputs = {}
-    $('#emSim [data-sim]').each(function () {
-      inputs[$(this).data('sim')] = $(this).is(':checkbox') ? ($(this).is(':checked') ? 1 : 0) : $(this).val()
-    })
-    $.ajax({
-      type: 'POST', url: 'plugins/energyManager/core/ajax/energyManager.ajax.php', dataType: 'json',
-      data: { action: 'simulate', inputs: JSON.stringify(inputs) },
-      success: function (data) {
-        if (data.state != 'ok') { $('#emSimOut').text(data.result); return }
-        var r = data.result.result, names = data.result.names, out = ''
-        if (r.alerts.length) { r.alerts.forEach(function (a) { out += '⚠ ' + a.message + '\n' }) }
-        if (!r.actions.length) { out += 'Aucune action.\n' }
-        r.actions.forEach(function (a) {
-          if (a.type == 'equip') { out += (names[a.id] || a.id) + ' → ' + a.cmd.toUpperCase() + ' : ' + a.reason + '\n' }
-          else if (a.type == 'hoymiles') { out += 'Limite Hoymiles → ' + a.value + ' W : ' + a.reason + '\n' }
-          else if (a.type == 'charge_limit') { out += 'Limite charge batterie → ' + a.value + ' W : ' + a.reason + '\n' }
-        })
-        out += '\n' + r.info.decision
-        $('#emSimOut').text(out)
-      }
-    })
-  })
+  window.location.href = 'index.php?v=d&m=energyManager&p=simulator'
 })
 
 /* Tableau des commandes */

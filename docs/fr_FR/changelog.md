@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Page de simulation complète (bouton « Simulateur » de la page des équipements) : widget powerFlow animé, jauges actionnables (solaire disponible, talon maison, SOC, eau du ballon, température des pièces), heure et vitesse réglables, courbe solaire de la journée.
+- Le simulateur exécute le vrai moteur de décision avec la configuration réelle (équipements, priorités, plages HC) ; modèle simplifié de la batterie, du ballon, des pièces et de teslasmartcharge. Décisions, ordres et alertes affichés en direct. Rien n'est lu ni envoyé sur l'installation.
+- Possibilité de tester : interrupteurs de pilotage, modes des équipements, priorité Tesla/Batterie, cible 95/100 %, panne de mesure, réponse Discord « Compléter avec EDF ».
+- Jeu d'équipements de démonstration si aucun équipement n'est encore créé.
+
 ## 0.2.2
 
 - Interrupteur général rouge/vert dans le widget : vert = energyManager pilote, rouge = il mesure et affiche seulement (aucun ordre, aucune alerte).

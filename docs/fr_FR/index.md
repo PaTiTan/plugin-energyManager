@@ -38,7 +38,10 @@ Le widget du gestionnaire reprend le principe du powerFlow : solaire, réseau, M
 
 ## Simulateur
 
-Dans la page des équipements, le bouton **Simulateur** exécute le moteur sur des valeurs que vous saisissez et affiche les décisions, sans envoyer aucun ordre.
+Deux outils distincts :
+
+- **Mode simulation** (configuration du plugin, bouton du widget) : le plugin lit les vraies mesures et calcule ses décisions, mais n'envoie aucun ordre.
+- **Page Simulateur** (bouton **Simulateur** de la page des équipements) : une installation entièrement virtuelle. Le widget est animé, des jauges permettent de régler le solaire disponible, le talon de la maison, le SOC, la température du ballon et des pièces, l'heure et la vitesse. Le vrai moteur de décision est exécuté à chaque cycle avec votre configuration (équipements, priorités, plages d'heures creuses) et ses ordres, décisions et alertes sont affichés en direct. Rien n'est lu ni commandé sur l'installation. Le modèle de la batterie, du ballon, des pièces et de teslasmartcharge est simplifié.
 
 ## FAQ
 

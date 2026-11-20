@@ -1,0 +1,78 @@
+/* Energy Manager - page de simulation */
+#emSim { padding: 8px; }
+#emSim .ems-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+#emSim .ems-title { font-size: 1.4em; font-weight: bold; }
+#emSim .ems-badge { background: #d9534f; color: #fff; border-radius: 4px; padding: 2px 10px; font-size: 12px; }
+#emSim .ems-badge-warn { background: #f0ad4e; }
+#emSim .ems-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: #1b2a38; color: #cfe3ee; border-radius: 8px; padding: 6px 12px; margin-bottom: 10px; }
+#emSim .ems-bar label { margin: 0; display: flex; align-items: center; gap: 6px; font-weight: normal; }
+#emSim .ems-bar select { width: auto; }
+#emSim .ems-clock { font-size: 1.5em; font-weight: bold; font-family: monospace; }
+#emSim .ems-slot { border-radius: 4px; padding: 1px 8px; font-weight: bold; background: #3b556b; }
+#emSim .ems-slot.hc { background: #3ecf63; color: #0b1620; }
+#emSim #ems-time { flex: 1 1 200px; min-width: 160px; }
+
+#emSim .ems-grid { display: grid; grid-template-columns: 120px minmax(340px, 1fr) 120px; gap: 10px; align-items: start; }
+#emSim .ems-side { display: flex; flex-direction: column; gap: 12px; align-items: center; background: #14202b; border-radius: 8px; padding: 10px 4px; }
+#emSim .ems-center { min-width: 0; }
+@media (max-width: 800px) {
+	#emSim .ems-grid { grid-template-columns: 1fr; }
+	#emSim .ems-side { flex-direction: row; justify-content: space-around; }
+}
+
+/* jauges actionnables */
+#emSim .ems-gauge { width: 100px; text-align: center; color: #cfe3ee; font-size: 12px; outline: none; user-select: none; }
+#emSim .ems-gauge.off { opacity: .35; pointer-events: none; }
+#emSim .ems-gv { font-size: 15px; font-weight: bold; cursor: pointer; }
+#emSim .ems-gt { position: relative; margin: 4px auto; width: 34px; height: 170px; background: #0b1620; border: 2px solid #3b556b; border-radius: 8px; cursor: ns-resize; touch-action: none; overflow: hidden; }
+#emSim .ems-gf { position: absolute; left: 0; right: 0; bottom: 0; background: var(--c); opacity: .85; }
+#emSim .ems-gh { position: absolute; left: -2px; right: -2px; height: 4px; background: #fff; box-shadow: 0 0 4px #000; }
+#emSim .ems-gauge:focus .ems-gt { border-color: #fff; }
+#emSim .ems-gl { line-height: 1.2; }
+
+/* panneau : mêmes couleurs que le widget */
+#emSim .ems-panel { background: #14202b; color: #cfe3ee; border-radius: 8px; padding: 8px; }
+#emSim .ems-panel svg { width: 100%; height: auto; display: block; }
+#emSim .node rect { fill: #1b2a38; stroke: #3b556b; stroke-width: 2; rx: 8; }
+#emSim .node text { fill: #e8f3fa; font-size: 15px; text-anchor: middle; }
+#emSim .node .lbl { fill: #8fb0c4; font-size: 11px; }
+#emSim .pv rect { stroke: #f5a623; } #emSim .pv text.val { fill: #f5a623; }
+#emSim .grid rect { stroke: #4a90d9; } #emSim .grid text.val { fill: #4a90d9; }
+#emSim .bat rect { stroke: #3ecf63; } #emSim .bat text.val { fill: #3ecf63; }
+#emSim .house rect { stroke: #4ec9b0; } #emSim .house text.val { fill: #4ec9b0; }
+#emSim .wire { fill: none; stroke: #3b556b; stroke-width: 3; }
+#emSim .flow { fill: none; stroke-width: 4; stroke-dasharray: 6 10; opacity: 0; }
+#emSim .flow.on { opacity: 1; animation: emsflow 1s linear infinite; }
+#emSim .flow.rev { animation-direction: reverse; }
+@keyframes emsflow { to { stroke-dashoffset: -16; } }
+
+#emSim .ems-led { display: inline-block; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; border: 2px solid #0b1620; vertical-align: middle; }
+#emSim .ems-led.ems-g { background: #3ecf63; box-shadow: 0 0 6px #3ecf63; }
+#emSim .ems-led.ems-r { background: #d9534f; box-shadow: 0 0 6px #d9534f; }
+#emSim .ems-master { font-size: 13px; margin-bottom: 4px; }
+
+#emSim .ems-cons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+#emSim .ems-tile { flex: 1 1 150px; background: #1b2a38; border: 2px solid #3b556b; border-radius: 8px; padding: 4px 8px; font-size: 12px; text-align: center; }
+#emSim .ems-tile.on { border-color: #4ec9b0; }
+#emSim .ems-tile.unpiloted { opacity: .55; border-style: dashed; }
+#emSim .ems-tile b { display: block; font-size: 15px; }
+#emSim .ems-tile .ems-led { width: 12px; height: 12px; float: right; }
+#emSim .ems-tile .ems-st { color: #8fb0c4; }
+#emSim .ems-tile .btn { padding: 0 6px; font-size: 11px; margin: 1px; }
+#emSim .ems-tile select { font-size: 11px; color: #000; }
+
+#emSim .ems-ctl { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; font-size: 12px; }
+#emSim .ems-ctl label { margin: 0; font-weight: normal; }
+#emSim .ems-ctl .btn { padding: 2px 8px; }
+#emSim .ems-ctl .btn.active, #emSim .ems-tile .btn.active { background: #4ec9b0; color: #0b1620; border-color: #4ec9b0; }
+
+#emSim .ems-decision { margin-top: 8px; background: #1b2a38; color: #e8f3fa; border-left: 4px solid #4ec9b0; border-radius: 4px; padding: 8px 12px; font-size: 14px; }
+#emSim .ems-decision.alert { border-left-color: #d9534f; }
+#emSim .ems-logtitle { margin: 10px 0 4px; font-weight: bold; }
+#emSim .ems-log { background: #0b1620; color: #cfe3ee; border-radius: 8px; padding: 6px 10px; height: 260px; overflow-y: auto; font-family: monospace; font-size: 12px; }
+#emSim .ems-log div { padding: 1px 0; border-bottom: 1px solid #1b2a38; }
+#emSim .ems-log .t { color: #8fb0c4; margin-right: 6px; }
+#emSim .ems-log .act { color: #3ecf63; }
+#emSim .ems-log .alert { color: #ff7b72; font-weight: bold; }
+#emSim .ems-log .info { color: #8fb0c4; }
+#emSim .ems-log .err { color: #f0ad4e; }

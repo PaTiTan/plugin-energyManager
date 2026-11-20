@@ -53,7 +53,7 @@ Sur la page du plugin, bloc **Démon** : cliquez **Démarrer** et activez la ges
 
 - Commande **Décision** du Gestionnaire : ce que le plugin ferait à chaque cycle.
 - **Analyse → Logs → energyManager** : chaque ordre est préfixé `[SIMULATION]`.
-- Bouton **Simulateur** de la page du plugin : saisissez des valeurs fictives (soleil, SOC, réseau) et lisez les décisions.
+- Bouton **Simulateur** de la page du plugin : une installation virtuelle avec des jauges (soleil, talon, SOC, ballon, pièces), l'heure réglable et le journal des décisions en direct. À essayer avant toute mise en service.
 - Placez le widget du Gestionnaire sur le dashboard.
 
 Vérifiez au moins une journée complète : démarrages au bon moment, aucun ordre incohérent, aucune alerte inattendue.
