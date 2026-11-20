@@ -48,6 +48,9 @@ class energyManagerEngine {
 		'min_pv'            => 300,   // W - en dessous, on considère qu'il n'y a pas de soleil
 		'tesla_margin'      => 300,   // W - marge laissée à teslasmartcharge en mode solaire
 		'tesla_priority'    => 'tesla', // 'tesla' ou 'battery'
+		'tesla_room_margin' => 500,   // W - la Tesla peut encore absorber si sa puissance est inférieure de plus que cette marge à son maximum
+		'tesla_grace'       => 120,   // s - délai laissé à la Tesla (confirmation 60 s + API) avant d'agir sans elle
+		'tesla_hold_max'    => 1500,  // W - au-delà de cette injection, on n'attend plus la Tesla
 		'ecs_pv_ok'         => 500,   // W - production à laquelle on estime que le ballon sera chauffé par le soleil
 	);
 
@@ -62,7 +65,7 @@ class energyManagerEngine {
 	public static function decide(array $s) {
 		$cfg = array_merge(self::DEFAULTS, isset($s['cfg']) ? $s['cfg'] : array());
 		$mem = array_merge(array(
-			'inj_since' => 0, 'imp_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0,
+			'inj_since' => 0, 'imp_since' => 0, 'inj_any_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0,
 		), isset($s['mem']) ? $s['mem'] : array());
 		$out = array('actions' => array(), 'alerts' => array(), 'info' => array(), 'mem' => $mem);
 		$now = (int) $s['now'];
@@ -102,16 +105,24 @@ class energyManagerEngine {
 		// durées d'état
 		$mem['inj_since'] = ($injection >= $cfg['inj_critical']) ? ($mem['inj_since'] ?: $now) : 0;
 		$mem['imp_since'] = ($import >= $cfg['imp_off']) ? ($mem['imp_since'] ?: $now) : 0;
+		$mem['inj_any_since'] = ($injection >= 100) ? ($mem['inj_any_since'] ?: $now) : 0;
 
 		$equips = isset($s['equips']) ? $s['equips'] : array();
 
 		/* ---------- 2. Tesla en mode solaire : teslasmartcharge régule seul ---------- */
 		$teslaSolar = false;
+		$teslaRoom = false;
 		foreach ($equips as $e) {
 			if ($e['type'] === 'tesla' && $e['mode'] === 'auto' && !empty($e['active'])) {
 				$teslaSolar = true;
+				$teslaRoom = ((float) $e['power_real'] < (float) $e['power_theo'] - $cfg['tesla_room_margin']);
 			}
 		}
+		// Priorité Tesla : tant qu'elle peut absorber et qu'elle a eu le temps de réagir, les autres consommateurs
+		// attendent (teslasmartcharge confirme chaque changement pendant 60 s). Une grosse injection n'attend pas.
+		$teslaGraceOver = $mem['inj_any_since'] > 0 && ($now - $mem['inj_any_since']) >= $cfg['tesla_grace'];
+		$teslaHolds = $teslaSolar && $teslaRoom && $cfg['tesla_priority'] === 'tesla'
+			&& !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
 
 		/* ---------- 3. Limite de charge batterie ---------- */
 		$newCharge = $cfg['charge_max'];
@@ -186,7 +197,7 @@ class energyManagerEngine {
 				continue;
 			}
 			// solaire : un seul démarrage par cycle, et seulement si le surplus le justifie
-			if ($started) {
+			if ($started || $teslaHolds) {
 				$wantsPending = true;
 				continue;
 			}
@@ -206,7 +217,7 @@ class energyManagerEngine {
 		$newHoy = $hoyLimit;
 		$reasonHoy = '';
 		$critical = $injection >= $cfg['inj_critical'];
-		if ($critical && !$started) {
+		if ($critical && !$started && !$teslaHolds) {
 			// aucun consommateur ne peut absorber : on bride la production pour ne pas injecter
 			$newHoy = max(0, min($hoyLimit, $pv) - $injection + 50);
 			$reasonHoy = 'injection ' . round($injection) . ' W non absorbable : limitation à ' . round($newHoy) . ' W';
@@ -247,6 +258,7 @@ class energyManagerEngine {
 			'import'    => round($import),
 			'daytime'   => $daytime ? 1 : 0,
 			'tesla_solar' => $teslaSolar ? 1 : 0,
+			'tesla_holds' => $teslaHolds ? 1 : 0,
 			'wants_pending' => $wantsPending ? 1 : 0,
 			'decision'  => count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)',
 		);
@@ -340,12 +352,22 @@ class energyManagerEngine {
 		return 'HP';
 	}
 
-	/** Parse "HH:MM-HH:MM HC" (une ligne par créneau) en liste de créneaux. */
-	public static function parseSlots($text) {
+	/**
+	 * Lit les plages d'heures creuses : JSON [{"s":"00:50","e":"06:50"}, ...].
+	 * @return array liste de array(debutMin, finMin, 'HC')
+	 */
+	public static function parseSlotsJson($json) {
 		$slots = array();
-		foreach (preg_split('/\R/', (string) $text) as $line) {
-			if (preg_match('/^\s*(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})\s+(HC|HP)\s*$/i', $line, $m)) {
-				$slots[] = array($m[1] * 60 + $m[2], $m[3] * 60 + $m[4], strtoupper($m[5]));
+		$list = json_decode((string) $json, true);
+		if (!is_array($list)) {
+			return $slots;
+		}
+		foreach ($list as $sl) {
+			if (isset($sl['s'], $sl['e'])
+				&& preg_match('/^\s*(\d{1,2})[:h](\d{2})\s*$/', $sl['s'], $a)
+				&& preg_match('/^\s*(\d{1,2})[:h](\d{2})\s*$/', $sl['e'], $b)
+				&& ($a[1] * 60 + $a[2]) != ($b[1] * 60 + $b[2])) {
+				$slots[] = array($a[1] * 60 + $a[2], $b[1] * 60 + $b[2], 'HC');
 			}
 		}
 		return $slots;

@@ -139,11 +139,13 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 
 		<legend><i class="fas fa-euro-sign"></i> {{Tarification EDF}}</legend>
 		<div class="form-group">
-			<label class="col-md-4 control-label">{{Créneaux HC / HP}}
-				<sup><i class="fas fa-question-circle tooltips" title="{{Une ligne par créneau, au format HH:MM-HH:MM HC ou HP.}}"></i></sup>
+			<label class="col-md-4 control-label">{{Plages d'heures creuses}}
+				<sup><i class="fas fa-question-circle tooltips" title="{{Ajoutez une plage par période d'heures creuses. Le reste du temps est en heures pleines.}}"></i></sup>
 			</label>
 			<div class="col-md-6">
-				<textarea class="configKey form-control" data-l1key="tariff_slots" rows="6" placeholder="00:00-00:50 HP&#10;00:50-06:50 HC&#10;06:50-14:20 HP&#10;14:20-16:20 HC&#10;16:20-00:00 HP"></textarea>
+				<div id="emSlots"></div>
+				<a class="btn btn-default btn-sm" id="emAddSlot"><i class="fas fa-plus-circle"></i> {{Ajouter une plage}}</a>
+				<input type="hidden" class="configKey" data-l1key="hc_slots"/>
 			</div>
 		</div>
 		<?php em_val_row('price_hc', '{{Prix du kWh heures creuses}}', '', '', '€'); ?>
@@ -163,4 +165,62 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 			input.value(result.human);
 		});
 	});
+</script>
+
+<script>
+(function () {
+	var $store = $('.configKey[data-l1key=hc_slots]');
+	var $box = $('#emSlots');
+
+	function norm(v) { // "22:00", "22h00" ou "2200" -> "22h00"
+		var m = ('0000' + String(v).replace(/\D/g, '')).slice(-4);
+		return m.slice(0, 2) + 'h' + m.slice(2);
+	}
+	function sync() {
+		var list = [];
+		$box.find('.emSlot').each(function () {
+			list.push({ s: $(this).find('.emS').val().replace('h', ':'), e: $(this).find('.emE').val().replace('h', ':') });
+		});
+		$store.val(JSON.stringify(list)).trigger('change');
+	}
+	function picker($input) {
+		$input.clockTimePicker({
+			alwaysSelectHoursFirst: true, autosize: false, separator: 'h', precision: 5,
+			minimum: '00h00', maximum: '23h59',
+			colors: { buttonTextColor: '#0797FF', clockFaceColor: '#EEEEEE', clockInnerCircleTextColor: '#888888',
+				clockInnerCircleUnselectableTextColor: '#CCCCCC', clockOuterCircleTextColor: '#000000',
+				clockOuterCircleUnselectableTextColor: '#CCCCCC', hoverCircleColor: '#DDDDDD', popupBackgroundColor: '#FFFFFF',
+				popupHeaderBackgroundColor: '#0797FF', popupHeaderTextColor: '#FFFFFF', selectorColor: '#0797FF', selectorNumberColor: '#FFFFFF' },
+			onChange: function () { sync(); }
+		});
+	}
+	function addRow(s, e) {
+		var $r = $('<div class="emSlot" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+			'<span>{{De}}</span><input type="text" class="emS form-control" style="width:90px;text-align:center;font-weight:bold">' +
+			'<span>{{à}}</span><input type="text" class="emE form-control" style="width:90px;text-align:center;font-weight:bold">' +
+			'<a class="btn btn-danger btn-xs emDel"><i class="fas fa-trash"></i></a></div>');
+		$r.find('.emS').val(norm(s));
+		$r.find('.emE').val(norm(e));
+		$box.append($r);
+		picker($r.find('.emS'));
+		picker($r.find('.emE'));
+	}
+	function load(v) {
+		var list = [];
+		try { list = JSON.parse(v) || []; } catch (x) { list = []; }
+		$box.empty();
+		list.forEach(function (sl) { addRow(sl.s, sl.e); });
+	}
+	$('#emAddSlot').off('click').on('click', function () { addRow('00:00', '06:00'); sync(); });
+	$box.off('click', '.emDel').on('click', '.emDel', function () { $(this).closest('.emSlot').remove(); sync(); });
+
+	$.getScript('plugins/energyManager/3rdparty/jquery-clock-timepicker.min.js', function () {
+		var tries = 0;
+		var t = setInterval(function () { // attend que Jeedom ait rempli les champs de configuration
+			tries++;
+			var v = $store.val();
+			if (v || tries > 15) { clearInterval(t); load(v || ''); }
+		}, 200);
+	});
+})();
 </script>

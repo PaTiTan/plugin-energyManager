@@ -12,11 +12,11 @@ Menu **Plugins → Énergie → Energy Manager → Configuration**.
 
 - **Sécurité et fonctionnement** : mode simulation, cadence de décision, âge maximal d'une mesure.
 - **Alertes** : webhook Discord d'urgence (alertes répétées en boucle), commande de message avec « ask » du plugin Discord.
-- **Mesures** : puissance réseau (négative = injection), production PV, batterie (puissance et SOC), maison, compteurs du jour.
+- **Mesures** : puissance réseau (positive = soutirage EDF, négative = injection), production PV, batterie (puissance et SOC), maison, compteurs du jour.
 - **Victron** : pour chaque levier (charge batterie, onduleur, SOC mini) une commande d'**ordre** et une commande de **retour**. Un ordre non confirmé par son retour déclenche une alerte.
 - **Hoymiles** : curseur de limitation (ordre et retour). C'est un dernier recours.
 - **Températures** : deux sondes extérieures, présence des parents.
-- **Tarification** : créneaux HC/HP, une ligne par créneau, par exemple `14:20-16:20 HC`.
+- **Tarification** : plages d'heures creuses ajoutées avec le bouton **Ajouter une plage** et un sélecteur d'heure. Le reste du temps est en heures pleines. teslasmartcharge peut reprendre ces plages.
 - **Prévisions** : commande optionnelle de prévision PV restante.
 
 ## Équipements
@@ -27,7 +27,7 @@ Chaque consommateur géré est un équipement du plugin.
 |---|---|
 | Consommateur simple | Radiateur piloté par un Shelly (ON/OFF), pièce avec sonde, consigne, priorité 1 à 3, capteur d'ouverture |
 | Ballon d'eau chaude | Minimum 52 °C, thermostat interne, chauffe solaire ou en heure creuse d'après-midi |
-| Tesla | Modes solaire / stand-by / non actif, relayés vers teslasmartcharge |
+| Tesla | Commande teslasmartcharge : mode (Solaire, Stand-By, Non actif) et priorité (voiture ou maison) |
 | Gestionnaire | Un seul : porte le widget powerFlow et les sélecteurs |
 
 Chaque équipement a trois modes : **auto**, **forcé ON**, **inactif**.
@@ -47,3 +47,9 @@ Dans la page des équipements, le bouton **Simulateur** exécute le moteur sur d
 **Pourquoi le curseur Hoymiles reste au maximum ?** Parce qu'il n'est utilisé qu'en dernier recours, quand aucun consommateur ne peut absorber l'injection.
 
 **Le ballon n'a pas chauffé.** Si l'heure creuse d'après-midi est passée et qu'il est resté froid, une demande vous est envoyée sur Discord pour compléter avec EDF.
+
+## Avec teslasmartcharge
+
+energyManager est le seul décideur de la priorité : le sélecteur « Tesla / Batterie » du widget envoie `voiture` ou `maison` à teslasmartcharge. Le mode est lu dans `mode_actuel` (teslasmartcharge bascule seul en Stand-By si la voiture est débranchée ou la cible atteinte).
+
+Avec la priorité Tesla, la limite de charge de la batterie passe à 0 W et le surplus part vers la voiture. Comme teslasmartcharge confirme chaque changement pendant 60 s, energyManager laisse la voiture monter (2 minutes au plus, tant que l'injection reste sous 1500 W) avant de donner le surplus à un autre consommateur ou de brider les Hoymiles.

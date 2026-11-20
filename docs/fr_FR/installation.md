@@ -29,18 +29,11 @@ Si une ligne est en erreur, envoyez-la : c'est le premier contrôle du code.
 
 **Plugins → Énergie → Energy Manager → icône Configuration.** Laissez **Mode simulation** coché.
 
-1. **Mesures** : puissance réseau (négative = injection), production PV, puissance et SOC batterie, puissance maison. Utilisez le bouton à droite de chaque champ pour choisir la commande.
+1. **Mesures** : puissance réseau (**positive = soutirage EDF**, négative = injection), production PV, puissance et SOC batterie, puissance maison. Utilisez le bouton à droite de chaque champ pour choisir la commande.
 2. **Victron** : pour la charge batterie, l'onduleur et le SOC mini, une commande d'**ordre** et une commande de **retour**.
 3. **Hoymiles** : le curseur de limite (ordre et retour), maximum 7600 W.
 4. **Températures** : les 2 sondes extérieures, la présence des parents.
-5. **Tarification** : un créneau par ligne.
-   ```
-   00:00-00:50 HP
-   00:50-06:50 HC
-   06:50-14:20 HP
-   14:20-16:20 HC
-   16:20-00:00 HP
-   ```
+5. **Tarification** : cliquez sur **Ajouter une plage** pour chaque période d'heures creuses, puis réglez le début et la fin avec le sélecteur d'heure (de 5 en 5 minutes). Pour votre contrat : 00h50-06h50 et 14h20-16h20. Le reste du temps est en heures pleines.
 6. **Alertes** : webhook Discord (`https://discord.com/api/webhooks/...`) et, si vous voulez la question « compléter avec EDF ? », la commande de message du plugin Discord.
 7. Sauvegardez.
 
@@ -54,7 +47,7 @@ Sur la page du plugin, bloc **Démon** : cliquez **Démarrer** et activez la ges
 
 - **Consommateur simple (radiateur)** : commandes ON/OFF du Shelly, puissance mesurée, puissance théorique, sonde de la pièce, consigne, priorité 1 à 3, capteur d'ouverture.
 - **Ballon d'eau chaude** : ON/OFF, puissance mesurée, température de l'eau, minimum 52 °C.
-- **Tesla** : les 3 commandes de teslasmartcharge (solaire, stand-by, non actif) et la puissance de charge.
+- **Tesla** : les commandes de teslasmartcharge `set_mode` (Définir Mode) et `set_priorite_charge` (Définir Priorité), l'info `mode_actuel` (Mode Actuel) et la puissance de charge. energyManager devient le seul décideur du mode et de la priorité : il lit le mode que teslasmartcharge choisit lui-même (Stand-By si débranchée, cible atteinte).
 
 ## 6. Observer en simulation
 

@@ -155,12 +155,40 @@ check('ballon avant les radiateurs', find_action($r, 'equip', array('id' => 50, 
 $r = energyManagerEngine::decide(base(array('grid' => -900, 'equips' => array($tesla, rad(1)))));
 check('Tesla solaire : marge de 300 W respectée', find_action($r, 'equip', array('cmd' => 'on')) === null);
 
-// 25. Créneaux HC/HP
-$slots = energyManagerEngine::parseSlots("00:00-00:50 HP\n00:50-06:50 HC\n06:50-14:20 HP\n14:20-16:20 HC\n16:20-00:00 HP");
-check('créneaux : 5 lignes lues', count($slots) === 5);
-check('créneaux : 15h = HC', energyManagerEngine::slotAt($slots, 15 * 60) === 'HC');
-check('créneaux : 10h = HP', energyManagerEngine::slotAt($slots, 10 * 60) === 'HP');
-check('créneaux : 3h = HC', energyManagerEngine::slotAt($slots, 3 * 60) === 'HC');
+// 24b. Priorité Tesla : on attend qu'elle monte plutôt que de donner le surplus à un radiateur
+$teslaSolaire = array('id' => 90, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 0, 'power_theo' => 7000, 'priority' => 1);
+$r = energyManagerEngine::decide(base(array('grid' => -1200, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire, rad(1)), 'mem' => array('inj_any_since' => 1000000 - 30))));
+check('priorité Tesla : le radiateur attend', find_action($r, 'equip', array('cmd' => 'on')) === null);
+
+// 24c. Priorité Tesla : si elle ne réagit pas au bout du délai, on agit
+$r = energyManagerEngine::decide(base(array('grid' => -1200, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire, rad(1)), 'mem' => array('inj_any_since' => 1000000 - 300))));
+check('Tesla sans réaction après le délai : le radiateur démarre', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
+
+// 24d. Priorité Tesla : une grosse injection n'attend pas
+$r = energyManagerEngine::decide(base(array('grid' => -2500, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire, rad(1)), 'mem' => array('inj_any_since' => 1000000 - 10))));
+check('grosse injection : on n\'attend pas la Tesla', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
+
+// 24e. Priorité Tesla : pas de bridage Hoymiles pendant qu'elle monte
+$r = energyManagerEngine::decide(base(array('grid' => -800, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
+check('priorité Tesla : Hoymiles non bridé pendant la montée', find_action($r, 'hoymiles') === null);
+
+// 24f. Tesla déjà à fond : plus de place, les autres consommateurs peuvent démarrer
+$teslaPleine = array_merge($teslaSolaire, array('power_real' => 6900));
+$r = energyManagerEngine::decide(base(array('grid' => -1200, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaPleine, rad(1)))));
+check('Tesla à fond : le radiateur peut démarrer', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
+
+// 25. Plages d'heures creuses (JSON du sélecteur)
+$slots = energyManagerEngine::parseSlotsJson('[{"s":"00:50","e":"06:50"},{"s":"14:20","e":"16:20"}]');
+check('plages : 2 plages lues', count($slots) === 2);
+check('plages : 15h = HC', energyManagerEngine::slotAt($slots, 15 * 60) === 'HC');
+check('plages : 10h = HP', energyManagerEngine::slotAt($slots, 10 * 60) === 'HP');
+check('plages : 3h = HC', energyManagerEngine::slotAt($slots, 3 * 60) === 'HC');
+check('plages : 00h30 = HP', energyManagerEngine::slotAt($slots, 30) === 'HP');
+$nuit = energyManagerEngine::parseSlotsJson('[{"s":"22:00","e":"06:00"}]');
+check('plage à cheval sur minuit : 23h = HC', energyManagerEngine::slotAt($nuit, 23 * 60) === 'HC');
+check('plage à cheval sur minuit : 7h = HP', energyManagerEngine::slotAt($nuit, 7 * 60) === 'HP');
+check('plages : JSON invalide = aucune plage', count(energyManagerEngine::parseSlotsJson('n\'importe quoi')) === 0);
+check('plages : format 22h00 accepté', count(energyManagerEngine::parseSlotsJson('[{"s":"22h00","e":"06h00"}]')) === 1);
 
 echo PHP_EOL . ($fail === 0 ? 'Tous les tests passent.' : $fail . ' test(s) en échec.') . PHP_EOL;
 exit($fail === 0 ? 0 : 1);

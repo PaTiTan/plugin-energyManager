@@ -132,7 +132,7 @@ class energyManager extends eqLogic {
 		$simulation = $_dry || (int) self::cfg('simulation', 1) === 1;
 
 		$minute = (int) date('G', $now) * 60 + (int) date('i', $now);
-		$slots = energyManagerEngine::parseSlots(self::cfg('tariff_slots', ''));
+		$slots = energyManagerEngine::parseSlotsJson(self::cfg('hc_slots', ''));
 		$slot = energyManagerEngine::slotAt($slots, $minute);
 		$hcAfternoon = false;
 		$hcAfternoonEnd = null;
@@ -177,6 +177,9 @@ class energyManager extends eqLogic {
 			if (!$simulation) {
 				self::applyAction($a, $now);
 			}
+		}
+		if (!$simulation) {
+			self::syncTeslaPriority();
 		}
 		self::checkFeedback($now);
 		self::ecsAsk($state['equips'], $minute, $hcAfternoonEnd);
@@ -243,9 +246,12 @@ class energyManager extends eqLogic {
 				$e['cut_on_zero'] = (int) $eq->getConfiguration('cut_on_zero', 1);
 				$e['forecast_poor'] = self::forecastPoor();
 			} elseif ($type === 'tesla') {
-				$tm = $eq->getConfiguration('tmode', 'inactive');
-				$e['mode'] = ($tm === 'inactive') ? 'off' : 'auto';
-				$e['active'] = ($tm === 'solar');
+				// le mode est décidé et mémorisé par teslasmartcharge (il bascule seul en Stand-By si débranchée ou cible atteinte)
+				$m = self::readCmd($eq->getConfiguration('cmd_mode_info'));
+				$tm = ($m !== null) ? (string) $m['value'] : '';
+				$e['mode'] = ($tm === 'Non actif') ? 'off' : 'auto';
+				$e['active'] = ($tm === 'Solaire');
+				$e['tesla_mode'] = $tm;
 			}
 			$list[] = $e;
 		}
@@ -427,6 +433,30 @@ class energyManager extends eqLogic {
 		cache::set('energyManager::pending::' . $_fbName, json_encode(array('value' => $_value, 't' => $_now)));
 	}
 
+	/**
+	 * Envoie à teslasmartcharge la priorité choisie dans energyManager (voiture ou maison).
+	 * Ne renvoie l'ordre que si la valeur a changé (ou si la Tesla vient d'être ajoutée).
+	 */
+	public static function syncTeslaPriority() {
+		$wanted = (self::cfg('tesla_priority', 'tesla') === 'tesla') ? 'voiture' : 'maison';
+		foreach (eqLogic::byType('energyManager', true) as $eq) {
+			if ($eq->getConfiguration('eqType') !== 'tesla') {
+				continue;
+			}
+			$key = 'energyManager::tesla_prio::' . $eq->getId();
+			if (cache::byKey($key)->getValue('') === $wanted) {
+				continue;
+			}
+			$cmd = self::resolveCmd($eq->getConfiguration('cmd_set_priority'));
+			if ($cmd === null) {
+				continue;
+			}
+			$cmd->execCmd(array('select' => $wanted));
+			cache::set($key, $wanted);
+			log::add('energyManager', 'info', 'Priorité de charge envoyée à teslasmartcharge : ' . $wanted);
+		}
+	}
+
 	/** Les ordres Victron / Ahoy doivent être confirmés par leur retour d'information. */
 	private static function checkFeedback($_now) {
 		$map = array('hoy' => 'cmd_hoy_limit_fb', 'charge' => 'cmd_charge_limit_fb');
@@ -526,7 +556,7 @@ class energyManager extends eqLogic {
 			}
 			$eq->checkAndUpdateCmd('power', $e['power_real']);
 			$eq->checkAndUpdateCmd('status', $e['is_on'] ? 'ON' : 'OFF');
-			$eq->checkAndUpdateCmd('mode_info', $eq->getConfiguration('mode', 'auto'));
+			$eq->checkAndUpdateCmd('mode_info', $e['type'] === 'tesla' ? (string) $e['tesla_mode'] : $eq->getConfiguration('mode', 'auto'));
 		}
 	}
 
@@ -674,8 +704,14 @@ class energyManagerCmd extends cmd {
 
 		if ($type === 'manager') {
 			switch ($id) {
-				case 'prio_tesla':   config::save('tesla_priority', 'tesla', 'energyManager'); break;
-				case 'prio_battery': config::save('tesla_priority', 'battery', 'energyManager'); break;
+				case 'prio_tesla':
+					config::save('tesla_priority', 'tesla', 'energyManager');
+					if ((int) energyManager::cfg('simulation', 1) !== 1) { energyManager::syncTeslaPriority(); }
+					break;
+				case 'prio_battery':
+					config::save('tesla_priority', 'battery', 'energyManager');
+					if ((int) energyManager::cfg('simulation', 1) !== 1) { energyManager::syncTeslaPriority(); }
+					break;
 				case 'target_95':    config::save('batt_target', 95, 'energyManager'); break;
 				case 'target_100':   config::save('batt_target', 100, 'energyManager'); break;
 				case 'sim_on':       config::save('simulation', 1, 'energyManager'); break;
@@ -700,16 +736,15 @@ class energyManagerCmd extends cmd {
 			return;
 		}
 		if ($type === 'tesla') {
-			$map = array('mode_solar' => array('solar', 'cmd_mode_solar'), 'mode_standby' => array('standby', 'cmd_mode_standby'),
-				'mode_inactive' => array('inactive', 'cmd_mode_inactive'));
+			// teslasmartcharge : set_mode attend select = Solaire | Stand-By | Non actif
+			$map = array('mode_solar' => 'Solaire', 'mode_standby' => 'Stand-By', 'mode_inactive' => 'Non actif');
 			if (isset($map[$id])) {
-				$target = energyManager::resolveCmd($eq->getConfiguration($map[$id][1]));
-				if ($target !== null) {
-					$target->execCmd();
+				$target = energyManager::resolveCmd($eq->getConfiguration('cmd_set_mode'));
+				if ($target === null) {
+					throw new Exception(__('Commande set_mode de teslasmartcharge non configurée', __FILE__));
 				}
-				$eq->setConfiguration('tmode', $map[$id][0]);
-				$eq->save(true);
-				$eq->checkAndUpdateCmd('mode_info', $map[$id][0]);
+				$target->execCmd(array('select' => $map[$id]));
+				$eq->checkAndUpdateCmd('mode_info', $map[$id]);
 			}
 			return;
 		}

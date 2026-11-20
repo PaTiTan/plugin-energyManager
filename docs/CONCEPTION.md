@@ -21,7 +21,7 @@ Plugin Jeedom (4.6.2, PHP 8.2, français uniquement). Objectif : **ne jamais pr�
 1. **Données** : si une mesure est périmée (> `stale_age`) ou incohérente, **aucun pilotage** et alerte Discord en boucle.
 2. **Batterie d'abord** : le MultiPlus (ESS) charge la batterie avec le surplus. L'injection mesurée (puissance réseau négative) n'apparaît donc que lorsque la limite de charge est atteinte ou la batterie pleine. Le plugin n'intervient que sur cette injection.
 3. **Cible de charge** : 100 % ou 95 % (sélecteur du widget). À la cible, la charge est coupée (0 W). Sur 95 %, la marge restante sert de **tampon** : si une injection critique apparaît, la charge est rouverte immédiatement le temps que les consommateurs démarrent.
-4. **Tesla** (sélecteur Tesla / Batterie) : en mode solaire et priorité Tesla, charge batterie à **0 W** ; teslasmartcharge régule seul (±300 W de soutirage/injection tolérés), le plugin laisse 300 W de marge avant de démarrer autre chose.
+4. **Tesla** (sélecteur Tesla / Batterie, envoyé à teslasmartcharge via `set_priorite_charge` : voiture / maison) : en mode solaire et priorité Tesla, charge batterie à **0 W** ; teslasmartcharge régule seul (±300 W tolérés). Il compte la charge batterie, l'injection et sa propre puissance comme surplus (soutirage positif, batterie positive en charge). Il confirme chaque changement 60 s : energyManager **laisse la Tesla monter** (2 min au plus, injection < 1 500 W) avant de donner le surplus à un autre consommateur ou de brider les Hoymiles. Le mode est lu dans `mode_actuel`.
 5. **Consommateurs** (un démarrage par cycle, 30 s de stabilisation) : ordre ballon → pièces par priorité 1 à 3. Résistances : pas d'hystérésis ni de durée mini.
 6. **Délestage** : soutirage ≥ 150 W pendant 30 s, ou plus de soleil → coupe le moins prioritaire alimenté en solaire.
 7. **Hoymiles = dernier recours** : limitation uniquement si injection ≥ 500 W et qu'aucun consommateur ne peut démarrer ; relèvement progressif ensuite ; remise au maximum la nuit. Le curseur est en flash : écritures espacées (60 s, 50 W mini), sauf réduction critique.
@@ -63,6 +63,6 @@ Démon : cron Jeedom en mode démon, cadence 10/20/30/60 s (sélecteur).
 
 - Climatisation tri-split : mise en attente à la demande de l'utilisateur.
 - Prévisions (Solcast / MeteoFull) : à reprendre plus tard.
-- Plugin teslasmartcharge : non accessible, les commandes mode solaire / stand-by / non actif sont donc choisies par l'utilisateur dans l'équipement.
+- Plugin teslasmartcharge : dépôt https://github.com/PaTiTan/plugin-teslasmartcharge ; energyManager pilote `set_mode` et `set_priorite_charge` et lit `mode_actuel`. Sondes de teslasmartcharge : habitation = Puissance live EDF (soutirage positif), batterie = SOC et puissance, voiture = puissance live Tesla.
 - Format exact de la réponse « ask » du plugin Discord : à vérifier sur le Jeedom réel (un bouton « Compléter avec EDF » existe en secours).
 - Le code n'a pas pu être exécuté ni vérifié syntaxiquement (pas de PHP sur le poste de développement) : lancer `php -l` et `php tests/engine_test.php` avant tout déploiement.

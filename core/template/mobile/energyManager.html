@@ -85,7 +85,7 @@
 				el('lim').textContent = 'Hoymiles ' + fmt(V.hoy) + ' · charge ' + fmt(V.chg)
 				el('dec').textContent = V.dec
 				setFlow('fpv', V.pv, false)
-				setFlow('fgrid', V.grid, true)      // soutirage : de la gauche vers le centre
+				setFlow('fgrid', V.grid, false)     // soutirage (positif) : du réseau vers la maison ; injection : sens inverse
 				setFlow('fbat', V.batt, false)      // charge : du centre vers la batterie
 				setFlow('fhouse', V.house, false)
 				document.getElementById('sim-' + uid).style.display = (String(V.sim) === '1') ? 'inline-block' : 'none'
