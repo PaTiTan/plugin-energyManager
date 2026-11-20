@@ -77,11 +77,18 @@ try {
 
 	/* Simulateur : un cycle du moteur sur l'état simulé envoyé par la page. Rien n'est envoyé à l'installation. */
 	if (init('action') == 'sim_step') {
-		$in = json_decode(init('state'), true);
+		$raw = init('state');
+		if (!is_string($raw) || strlen($raw) > 500000) {
+			throw new Exception(__('Entrées invalides', __FILE__));
+		}
+		$in = json_decode($raw, true);
 		if (!is_array($in)) {
 			throw new Exception(__('Entrées invalides', __FILE__));
 		}
-		$minute = max(0, min(1439, (int) $in['minute']));
+		$num = function ($k, $def) use ($in) {
+			return (isset($in[$k]) && is_numeric($in[$k])) ? (float) $in[$k] : $def;
+		};
+		$minute = max(0, min(1439, (int) $num('minute', 720)));
 		$hc = energyManager::hcInfo($minute);
 		$cfg = energyManager::engineConfig();
 		if (isset($in['cfg']['batt_target'])) {
@@ -99,29 +106,31 @@ try {
 		$equips = array();
 		$names = array();
 		foreach ((isset($in['equips']) && is_array($in['equips'])) ? $in['equips'] : array() as $e) {
-			if (!is_array($e) || !isset($e['id'], $e['type'])) {
+			if (!is_array($e) || !isset($e['id'], $e['type']) || !is_scalar($e['id'])) {
 				continue;
 			}
-			$names[$e['id']] = isset($e['name']) ? $e['name'] : '#' . $e['id'];
+			$names[(string) $e['id']] = (isset($e['name']) && is_scalar($e['name'])) ? (string) $e['name'] : '#' . $e['id'];
 			if (!empty($e['piloted'])) {
 				$equips[] = $e;
 			}
 		}
 		$state = array(
-			'now' => (int) $in['now'], 'minute' => $minute,
-			'grid' => (float) $in['grid'], 'pv' => (float) $in['pv'], 'soc' => (float) $in['soc'],
-			'batt' => (float) $in['batt'], 'house' => (float) $in['house'],
+			'now' => (int) $num('now', time()), 'minute' => $minute,
+			'grid' => $num('grid', null), 'pv' => $num('pv', null), 'soc' => $num('soc', null),
+			'batt' => $num('batt', null), 'house' => $num('house', null),
 			'forecast_kwh' => (isset($in['forecast_kwh']) && is_numeric($in['forecast_kwh'])) ? (float) $in['forecast_kwh'] : null,
 			'stale' => !empty($in['stale']) ? array('cmd_grid (panne simulée)') : array(),
 			'hc' => ($hc['slot'] === 'HC'), 'hc_afternoon' => $hc['afternoon'],
-			'cfg' => $cfg, 'hoy_limit' => (float) $in['hoy_limit'], 'charge_limit' => (float) $in['charge_limit'],
-			'inv_limit' => isset($in['inv_limit']) ? (float) $in['inv_limit'] : (float) $cfg['inv_max'],
+			'cfg' => $cfg, 'hoy_limit' => $num('hoy_limit', (float) $cfg['hoy_max']), 'charge_limit' => $num('charge_limit', (float) $cfg['charge_max']),
+			'inv_limit' => $num('inv_limit', (float) $cfg['inv_max']),
 			'equips' => $equips, 'mem' => (isset($in['mem']) && is_array($in['mem'])) ? $in['mem'] : array(),
 		);
 		ajax::success(array('result' => energyManagerEngine::decide($state), 'names' => $names, 'slot' => $hc['slot'], 'hc_afternoon' => $hc['afternoon']));
 	}
 
-	throw new Exception(__('Aucune méthode correspondante à', __FILE__) . ' : ' . init('action'));
+	throw new Exception(__('Aucune méthode correspondante à', __FILE__) . ' : ' . htmlspecialchars((string) init('action'), ENT_QUOTES, 'UTF-8'));
 } catch (Exception $e) {
 	ajax::error(displayException($e), $e->getCode());
+} catch (Throwable $e) {
+	ajax::error(htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8'), 0);
 }

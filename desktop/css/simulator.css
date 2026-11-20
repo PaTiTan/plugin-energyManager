@@ -17,7 +17,7 @@
 #emSim .ems-center { min-width: 0; }
 @media (max-width: 800px) {
 	#emSim .ems-grid { grid-template-columns: 1fr; }
-	#emSim .ems-side { flex-direction: row; justify-content: space-around; }
+	#emSim .ems-side { flex-direction: row; flex-wrap: wrap; justify-content: space-around; }
 }
 
 /* jauges actionnables */
@@ -67,13 +67,13 @@
 #emSim .ems-ctl .btn.active, #emSim .ems-tile .btn.active { background: #4ec9b0; color: #0b1620; border-color: #4ec9b0; }
 
 #emSim .ems-decision { margin-top: 8px; background: #1b2a38; color: #e8f3fa; border-left: 4px solid #4ec9b0; border-radius: 4px; padding: 8px 12px; font-size: 14px; }
-#emSim .ems-decision.alert { border-left-color: #d9534f; }
+#emSim .ems-decision.ems-alert { border-left-color: #d9534f; }
 #emSim .ems-logtitle { margin: 10px 0 4px; font-weight: bold; }
 #emSim .ems-log { background: #0b1620; color: #cfe3ee; border-radius: 8px; padding: 6px 10px; height: 260px; overflow-y: auto; font-family: monospace; font-size: 12px; }
 #emSim .ems-log div { padding: 1px 0; border-bottom: 1px solid #1b2a38; }
 #emSim .ems-log .t { color: #8fb0c4; margin-right: 6px; }
 #emSim .ems-log .act { color: #3ecf63; }
-#emSim .ems-log .alert { color: #ff7b72; font-weight: bold; }
+#emSim .ems-log .ems-alert { color: #ff7b72; font-weight: bold; }
 #emSim .ems-log .info { color: #8fb0c4; }
 #emSim .ems-log .err { color: #f0ad4e; }
 #emSim .ems-decision:empty { display: none; }

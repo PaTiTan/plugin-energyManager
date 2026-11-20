@@ -30,6 +30,11 @@ function energyManager_install() {
 }
 
 function energyManager_update() {
+	// Sécurité : une mise à jour ne doit jamais laisser le mode simulation indéfini (clé absente = simulation).
+	$sim = config::byKey('simulation', 'energyManager', '');
+	if ($sim === '' || $sim === null) {
+		config::save('simulation', 1, 'energyManager');
+	}
 	// Une erreur sur un équipement ne doit jamais faire échouer (et donc désactiver) le plugin : elle est journalisée.
 	try {
 		energyManager::ensureMainEquipment();

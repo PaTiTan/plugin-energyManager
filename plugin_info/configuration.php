@@ -44,7 +44,7 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		echo ' <sup><i class="fas fa-question-circle tooltips" title="' . $help . '"></i></sup>';
 	}
 	echo '</label>';
-	echo '<div class="col-md-3"><input class="configKey form-control" data-l1key="' . $key . '" placeholder="' . $default . '"/></div>';
+	echo '<div class="col-md-3"><input class="configKey form-control" data-l1key="' . $key . '" type="number" step="any" placeholder="' . $default . '"/></div>';
 	if ($unit !== '') {
 		echo '<div class="col-md-1" style="padding-top:7px">' . $unit . '</div>';
 	}
@@ -75,6 +75,8 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		<?php em_val_row('stale_age', '{{Âge maximal d\'une mesure}}', '300', '{{Au-delà, la donnée est périmée : aucun pilotage et alerte.}}', 's'); ?>
 		<?php em_val_row('stale_age_soc', '{{Âge maximal du SOC batterie}}', '0', '{{0 = pas de contrôle d\'âge (le SOC varie peu). Seule l\'absence de valeur bloque le pilotage.}}', 's'); ?>
 		<?php em_val_row('feedback_delay', '{{Délai de confirmation d\'un ordre}}', '90', '{{Un ordre Victron/Ahoy non confirmé par son retour d\'information après ce délai déclenche une alerte.}}', 's'); ?>
+		<?php em_val_row('min_pv', '{{Production solaire minimale}}', '300', '{{En dessous, on considère qu\'il n\'y a pas de soleil : les consommateurs alimentés par le solaire sont arrêtés.}}', 'W'); ?>
+		<?php em_val_row('imp_off', '{{Soutirage EDF déclenchant le délestage}}', '150', '{{Un soutirage au-delà de cette valeur, pendant 30 secondes, arrête le consommateur le moins prioritaire alimenté par le solaire.}}', 'W'); ?>
 
 		<legend><i class="fab fa-discord"></i> {{Alertes}}</legend>
 		<div class="form-group">
@@ -85,10 +87,11 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 			<label class="col-md-4 control-label">{{Votre identifiant Discord (mention)}}
 				<sup><i class="fas fa-question-circle tooltips" title="{{Les alertes critiques vous mentionnent. Saisissez l'identifiant seul ou la forme <@identifiant>.}}"></i></sup>
 			</label>
-			<div class="col-md-4"><input class="configKey form-control" data-l1key="discord_user_id" placeholder="<@330819841735000065>"/></div>
+			<div class="col-md-4"><input class="configKey form-control" data-l1key="discord_user_id" placeholder="<@123456789012345678>"/></div>
 		</div>
 		<?php em_cmd_row('cmd_ask', '{{Commande de message avec "ask" (plugin Discord)}}', 'action', '{{Utilisée pour demander s\'il faut compléter le ballon avec EDF.}}'); ?>
 		<?php em_val_row('alert_repeat', '{{Répétition des alertes}}', '300', '{{Une alerte est renvoyée en boucle tant que le problème persiste.}}', 's'); ?>
+		<?php em_val_row('alert_rearm', '{{Délai de réarmement d\'une alerte}}', '120', '{{Une alerte disparue n\'est réarmée qu\'après ce délai sans réapparaître (antirebond).}}', 's'); ?>
 		<?php em_val_row('inj_critical', '{{Injection critique}}', '500', '', 'W'); ?>
 		<?php em_val_row('inj_legal', '{{Injection maximale légale}}', '3000', '', 'W'); ?>
 
@@ -100,7 +103,7 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		<?php em_val_row('talon', '{{Talon de la maison}}', '400', '{{Consommation de base, utilisée pour projeter le SOC du soir avec la prévision solaire.}}', 'W'); ?>
 		<?php em_val_row('batt_kwh', '{{Capacité de la batterie}}', '16', '', 'kWh'); ?>
 		<?php em_val_row('ecs_deadline', '{{Heure limite du ballon}}', '16', '{{Si le ballon n\'a pas atteint la température de son thermostat à cette heure, il est mis sur OFF et une alerte Discord est envoyée.}}', 'h'); ?>
-		<?php em_val_row('ecs_absorb_temp', '{{Température au-delà de laquelle le ballon n\'absorbe plus}}', '50', '{{Sert à décider de laisser la limite Hoymiles au maximum.}}', '°C'); ?>
+		<?php em_val_row('ecs_absorb_temp', '{{Température au-delà de laquelle le ballon n\'absorbe plus (réservé, pas encore utilisé)}}', '50', '', '°C'); ?>
 
 		<legend><i class="fas fa-solar-panel"></i> {{Mesures}}</legend>
 		<?php em_cmd_row('cmd_grid', '{{Puissance réseau (signée)}}', 'info', '{{Positif = soutirage EDF, négatif = injection.}}'); ?>
@@ -108,19 +111,19 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		<?php em_cmd_row('cmd_batt', '{{Puissance batterie (signée)}}', 'info', '{{Positif = charge, négatif = décharge.}}'); ?>
 		<?php em_cmd_row('cmd_soc', '{{SOC batterie}}'); ?>
 		<?php em_cmd_row('cmd_house', '{{Puissance maison}}'); ?>
-		<?php em_cmd_row('cmd_kwh_grid', '{{kWh du jour soutirés EDF}}'); ?>
-		<?php em_cmd_row('cmd_kwh_house', '{{kWh du jour consommés (maison)}}'); ?>
-		<?php em_cmd_row('cmd_kwh_charge', '{{kWh du jour chargés (batterie)}}'); ?>
-		<?php em_cmd_row('cmd_kwh_discharge', '{{kWh du jour déchargés (batterie)}}'); ?>
+		<?php em_cmd_row('cmd_kwh_grid', '{{kWh du jour soutirés EDF (réservé, pas encore utilisé)}}'); ?>
+		<?php em_cmd_row('cmd_kwh_house', '{{kWh du jour consommés (maison) (réservé, pas encore utilisé)}}'); ?>
+		<?php em_cmd_row('cmd_kwh_charge', '{{kWh du jour chargés (batterie) (réservé, pas encore utilisé)}}'); ?>
+		<?php em_cmd_row('cmd_kwh_discharge', '{{kWh du jour déchargés (batterie) (réservé, pas encore utilisé)}}'); ?>
 
 		<legend><i class="fas fa-car-battery"></i> {{Victron MultiPlus-II (ordres et retours)}}</legend>
 		<?php em_cmd_row('cmd_charge_limit', '{{Ordre : puissance de charge batterie}}', 'action', '{{0 à 3680 W, par pas de 5 A.}}'); ?>
 		<?php em_cmd_row('cmd_charge_limit_fb', '{{Retour : puissance de charge batterie}}'); ?>
 		<?php em_cmd_row('cmd_inv_limit', '{{Ordre : puissance onduleur}}', 'action', '{{0 à 4000 W, par pas de 50 W.}}'); ?>
 		<?php em_cmd_row('cmd_inv_limit_fb', '{{Retour : puissance onduleur}}'); ?>
-		<?php em_cmd_row('cmd_soc_min', '{{Ordre : SOC mini}}', 'action', '{{5 à 100 %.}}'); ?>
-		<?php em_cmd_row('cmd_soc_min_fb', '{{Retour : SOC mini}}'); ?>
-		<?php em_val_row('soc_min', '{{SOC mini de base}}', '10', '{{Doit tenir jusqu\'au lever du soleil (apprentissage prévu en v0.3).}}', '%'); ?>
+		<?php em_cmd_row('cmd_soc_min', '{{Ordre : SOC mini (réservé, pas encore utilisé)}}', 'action', '{{5 à 100 %.}}'); ?>
+		<?php em_cmd_row('cmd_soc_min_fb', '{{Retour : SOC mini (réservé, pas encore utilisé)}}'); ?>
+		<?php em_val_row('soc_min', '{{SOC mini de base}}', '10', '{{Doit tenir jusqu\'au lever du soleil.}}', '%'); ?>
 		<?php em_val_row('charge_max', '{{Charge batterie maximale}}', '3680', '', 'W'); ?>
 		<?php em_val_row('inv_max', '{{Puissance onduleur maximale}}', '4000', '', 'W'); ?>
 		<div class="form-group">
@@ -152,7 +155,7 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		<?php em_cmd_row('cmd_temp_ext_back', '{{Température extérieure derrière (sud/sud-est)}}'); ?>
 		<?php em_val_row('season_heat_below', '{{Chauffage sous (moyenne 24 h)}}', '15', '', '°C'); ?>
 		<?php em_val_row('season_cool_above', '{{Refroidissement au-dessus (moyenne 24 h)}}', '24', '', '°C'); ?>
-		<?php em_cmd_row('cmd_presence_parents', '{{Présence des parents (1 ou 0)}}'); ?>
+		<?php em_cmd_row('cmd_presence_parents', '{{Présence des parents (1 ou 0) (réservé, pas encore utilisé)}}'); ?>
 
 		<legend><i class="fas fa-euro-sign"></i> {{Tarification EDF}}</legend>
 		<div class="form-group">
@@ -165,11 +168,11 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 				<input type="hidden" class="configKey" data-l1key="hc_slots"/>
 			</div>
 		</div>
-		<?php em_val_row('price_hc', '{{Prix du kWh heures creuses}}', '', '', '€'); ?>
-		<?php em_val_row('price_hp', '{{Prix du kWh heures pleines}}', '', '', '€'); ?>
+		<?php em_val_row('price_hc', '{{Prix du kWh heures creuses (réservé, pas encore utilisé)}}', '', '', '€'); ?>
+		<?php em_val_row('price_hp', '{{Prix du kWh heures pleines (réservé, pas encore utilisé)}}', '', '', '€'); ?>
 
 		<legend><i class="fas fa-cloud-sun"></i> {{Prévisions}}</legend>
-		<?php em_cmd_row('cmd_forecast_kwh', '{{Prévision PV restante aujourd\'hui (kWh), optionnel}}', 'info', '{{Solcast + MeteoFull arriveront en v0.3. En attendant, une commande suffit.}}'); ?>
+		<?php em_cmd_row('cmd_forecast_kwh', '{{Prévision PV restante aujourd\'hui (kWh), optionnel}}', 'info', '{{Une commande donnant la prévision de production restante du jour suffit (Solcast, MeteoFull ou autre).}}'); ?>
 		<?php em_val_row('forecast_min_kwh', '{{Seuil de prévision médiocre}}', '8', '', 'kWh'); ?>
 
 	</fieldset>
@@ -197,7 +200,7 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		// Format texte "00:50-06:50;14:20-16:20" (Jeedom décode automatiquement toute valeur qui ressemble à du JSON)
 		var list = [];
 		$box.find('.emSlot').each(function () {
-			list.push($(this).find('.emS').val().replace('h', ':') + '-' + $(this).find('.emE').val().replace('h', ':'));
+			list.push(norm($(this).find('.emS').val()).replace('h', ':') + '-' + norm($(this).find('.emE').val()).replace('h', ':'));
 		});
 		$store.val(list.join(';')).trigger('change');
 	}
@@ -231,13 +234,14 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 	}
 	$('#emAddSlot').off('click').on('click', function () { addRow('00:00', '06:00'); sync(); });
 	$box.off('click', '.emDel').on('click', '.emDel', function () { $(this).closest('.emSlot').remove(); sync(); });
+	$box.off('change', '.emS, .emE').on('change', '.emS, .emE', function () { $(this).val(norm($(this).val())); sync(); });
 
 	$.getScript('plugins/energyManager/3rdparty/jquery-clock-timepicker.min.js', function () {
 		var tries = 0;
 		var t = setInterval(function () { // attend que Jeedom ait rempli les champs de configuration
 			tries++;
 			var v = $store.val();
-			if (v || tries > 15) { clearInterval(t); load(v || ''); }
+			if (v || tries > 50) { clearInterval(t); load(v || ''); }
 		}, 200);
 	});
 })();

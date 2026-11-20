@@ -5,6 +5,7 @@
 (function () {
   'use strict'
   if (!$('#emSim').length) { return }
+  var root = document.getElementById('emSim')
 
   var AJAX = 'plugins/energyManager/core/ajax/energyManager.ajax.php'
   var CAP_WH = 16000      // capacité batterie
@@ -19,7 +20,8 @@
   var S = null            // état simulé
   var timer = null
   var inflight = false
-  var logs = []
+  var gen = 0             // génération de la simulation : une réponse du serveur d'une génération précédente est ignorée
+  var lastPlay = null
   var alertLast = {}
 
   /* ------------------------------------------------------------------ utilitaires */
@@ -39,15 +41,15 @@
     return d.getHours() * 60 + d.getMinutes()
   }
   function log(kind, text) {
-    logs.unshift({ t: clockText(S ? S.t : Date.now() / 1000), k: kind, x: text })
-    if (logs.length > 200) { logs.pop() }
-    var html = ''
-    logs.forEach(function (l) { html += '<div><span class="t">' + l.t + '</span><span class="' + l.k + '">' + esc(l.x) + '</span></div>' })
-    el('log').innerHTML = html
+    var box = el('log')
+    var d = document.createElement('div')
+    d.innerHTML = '<span class="t">' + esc(clockText(S ? S.t : Date.now() / 1000)) + '</span><span class="' + kind + '">' + esc(text) + '</span>'
+    box.insertBefore(d, box.firstChild)
+    while (box.children.length > 200) { box.removeChild(box.lastChild) }
   }
   function call(action, data, ok) {
     $.ajax({
-      type: 'POST', url: AJAX, dataType: 'json', data: $.extend({ action: action }, data),
+      type: 'POST', url: AJAX, dataType: 'json', timeout: 15000, data: $.extend({ action: action }, data),
       success: function (r) {
         if (r.state !== 'ok') { inflight = false; log('err', 'Erreur : ' + r.result); return }
         ok(r.result)
@@ -173,7 +175,7 @@
         // priorité « maison » sous le seuil de SOC : la batterie passe d'abord (sa charge n'est pas offerte à la voiture), mais la voiture
         // n'attend jamais : elle prend tout ce que la batterie n'absorbe pas (l'injection) dès qu'il y a 2 A
         var battFirst = (S.prio === 'battery' && S.soc < S.threshold)
-        var apport = battFirst ? 0 : S.batt
+        var apport = battFirst ? Math.min(0, S.batt) : S.batt     // la décharge de la batterie compte toujours
         var allow = apport - S.grid + e.power_real - (e.margin || 0)     // marge de teslasmartcharge : négative = soutirage EDF toléré
         var amps = Math.min(32, Math.floor(allow / 230))
         if (amps < 2) { amps = 0 }
@@ -241,6 +243,7 @@
     }
     S.safeDone = false
     inflight = true
+    var g = gen
     var state = {
       now: Math.floor(S.t), minute: minuteOf(S.t), grid: S.grid, pv: S.pv, soc: S.soc, batt: S.batt, house: S.house,
       stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio, night_reserve: S.reserve, battery_threshold: S.threshold }, hoy_limit: S.hoy, charge_limit: S.chg, inv_limit: S.inv,
@@ -248,6 +251,7 @@
       equips: S.equips, mem: S.mem
     }
     call('sim_step', { state: JSON.stringify(state) }, function (res) {
+      if (g !== gen) { return }
       inflight = false
       var r = res.result
       S.mem = r.mem || {}
@@ -268,7 +272,7 @@
       r.alerts.forEach(function (al) {
         var last = alertLast[al.key]
         if (last === undefined || S.t - last >= 300) {   // alerte renvoyée en boucle toutes les 5 minutes
-          log('alert', '🚨 ' + al.message + (last === undefined ? '' : ' (alerte répétée)'))
+          log('ems-alert', '🚨 ' + al.message + (last === undefined ? '' : ' (alerte répétée)'))
           alertLast[al.key] = S.t
         }
       })
@@ -281,7 +285,7 @@
 
   /* ------------------------------------------------------------------ boucle */
   function tick() {
-    if (!$('#emSim').length) { clearInterval(timer); return }
+    if (!root || !document.body.contains(root)) { clearInterval(timer); return }
     if (!S || !S.running) { return }
     var dt = S.speed
     S.t += dt
@@ -301,7 +305,8 @@
   function render() {
     el('pv').textContent = W(S.pv)
     el('pvavail').textContent = 'dispo ' + W(S.pvA)
-    el('grid').textContent = (S.grid < 0 ? 'injection ' : 'soutirage ') + W(Math.abs(S.grid))
+    el('gridl').textContent = S.grid < 0 ? '⚡ INJECTION EDF' : '⚡ SOUTIRAGE EDF'
+    el('grid').textContent = W(Math.abs(S.grid))
     el('house').textContent = W(S.house)
     el('bat').textContent = Math.round(S.soc) + ' % · ' + W(S.batt)
     el('inj').textContent = 'injection ' + W(Math.max(0, -S.grid))
@@ -312,7 +317,11 @@
     el('clock').textContent = clockText(S.t)
     var $slot = $(el('slot')); $slot.text(S.slot || 'HP').toggleClass('hc', S.slot === 'HC')
     if (!S.dragTime) { el('time').value = minuteOf(S.t) }
-    el('play').innerHTML = S.running ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>'
+    var playState = S.running ? 1 : 0
+    if (playState !== lastPlay) {
+      lastPlay = playState
+      el('play').innerHTML = S.running ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>'
+    }
 
     el('active').className = 'ems-led ' + (S.active ? 'ems-g' : 'ems-r')
     el('activetxt').textContent = S.active ? 'Pilotage actif' : 'Pilotage désactivé : rien n\'est commandé'
@@ -321,7 +330,7 @@
 
     var d = el('decision')
     d.textContent = S.decision || 'En attente du premier cycle…'
-    d.className = 'ems-decision' + (S.decisionAlert ? ' alert' : '')
+    d.className = 'ems-decision' + (S.decisionAlert ? ' ems-alert' : '')
     el('night').textContent = S.night
       ? 'Réserve de nuit : SOC projeté au soir ' + S.night.proj + ' % (réserve demandée ' + Math.round(S.reserve) + ' %) → le ballon '
         + (S.night.may ? 'PEUT passer avant la batterie' : 'ne passe PAS avant la batterie : injection réelle ou heure creuse EDF seulement')
@@ -373,7 +382,9 @@
       pv: 0, pvA: 0, grid: 0, batt: 0, house: 0, dragTime: false
     }
     S.equips.forEach(function (e) { if (e.piloted === undefined) { e.piloted = true } })
-    logs = []; alertLast = {}
+    el('log').innerHTML = ''
+    lastPlay = null
+    alertLast = {}
     $('#ems-demo').toggle(!!init.demo)
     $('#ems-forecast').prop('checked', false); $('#ems-auto').prop('checked', false); $('#ems-stale').prop('checked', false); $('#ems-heat').prop('checked', true)
     if (!bound) { bound = true; bind() }
@@ -386,15 +397,17 @@
   }
   function load() {
     inflight = false
-    call('sim_init', {}, start)
+    gen++
+    var g = gen
+    call('sim_init', {}, function (init) { if (g !== gen) { return } start(init) })
   }
 
   /* ------------------------------------------------------------------ commandes de la page */
   var bound = false
+  $('#ems-reset').on('click', load)
   function bind() {
     $('#ems-play').on('click', function () { S.running = !S.running; render() })
     $('#ems-speed').on('change', function () { S.speed = num($(this).val()) || 10 })
-    $('#ems-reset').on('click', load)
     $('#ems-time').on('pointerdown', function () { S.dragTime = true })
     $('#ems-time').on('pointerup pointercancel blur', function () { S.dragTime = false })
     $('#ems-time').on('input', function () {
@@ -418,6 +431,7 @@
     })
     $('#ems-cons').on('click', '[data-act]', function () {
       var a = $(this).data('act'), e = S.equips[parseInt($(this).data('i'), 10)]
+      if (a === 'tmode' || a === 'aggr') { return }
       if (!e) { return }
       if (a === 'led') {
         e.piloted = !e.piloted
@@ -439,6 +453,7 @@
     $('#ems-cons').on('change', 'select[data-act=aggr]', function () {
       var e = S.equips[parseInt($(this).data('i'), 10)]
       if (e) { e.aggr_w = num($(this).val()); log('info', e.name + ' : agressivité ' + e.aggr_w + ' W') }
+      this.blur()
     })
     $('#ems-cons').on('change', 'select[data-act=tmode]', function () {
       var e = S.equips[parseInt($(this).data('i'), 10)]
@@ -449,6 +464,7 @@
     else { e.plugged = false; e.tesla_mode = 'Stand-By'; e.plug_handled = false; log('info', e.name + ' : voiture débranchée (Stand-By)') }
       S.since = CYCLE
       render()
+      this.blur()
     })
   }
 

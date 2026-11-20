@@ -189,6 +189,7 @@ function em_eq_val($key, $label, $default, $unit = '', $help = '') {
 								<?php em_eq_cmd('cmd_set_mode', '{{teslasmartcharge : commande « Définir Mode » (set_mode)}}', 'action', '{{energyManager envoie Solaire, Stand-By ou Non actif.}}'); ?>
 								<?php em_eq_cmd('cmd_mode_info', '{{teslasmartcharge : info « Mode Actuel » (mode_actuel)}}', 'info', '{{teslasmartcharge change de mode seul (voiture débranchée, cible atteinte) : energyManager le lit ici.}}'); ?>
 								<?php em_eq_cmd('cmd_set_priority', '{{teslasmartcharge : commande « Définir Priorité » (set_priorite_charge)}}', 'action', '{{energyManager envoie voiture ou maison selon son sélecteur de priorité.}}'); ?>
+								<?php em_eq_cmd('cmd_set_threshold', '{{teslasmartcharge : commande « Définir Seuil Bat Maison » (facultatif)}}', 'action', '{{Détectée automatiquement (set_seuil_batterie_maison).}}'); ?>
 								<div class="form-group emField" data-key="aggressiveness">
 									<label class="col-sm-4 control-label">{{Agressivité}} <sup><i class="fas fa-question-circle tooltips" title="{{Puissance libérée à la fois sur la limite des micro-onduleurs une fois la charge en cours. Avant, seuls 500 W sont libérés pour déclencher la charge.}}"></i></sup></label>
 									<div class="col-sm-4">

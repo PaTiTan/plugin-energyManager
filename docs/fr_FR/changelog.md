@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0
+
+- **Correctif majeur : afficher le widget exécutait les commandes d'action du Gestionnaire** (priorité, simulation, pilotage, réserve). Elles pouvaient changer toutes seules, désactiver le pilotage ou le plugin. Le widget ne lit plus que les commandes d'information.
+- **Fiabilité du démon** : la configuration est relue en base à chaque cycle (le démon voit enfin les changements faits depuis le widget) ; si elle est illisible, le cycle tourne en simulation avec une alerte ; une commande introuvable donne une alerte au lieu d'un cycle mort ; chaque étape du cycle est isolée (un ordre en échec n'empêche plus les autres ni les alertes) ; alertes Discord sans rafale (clé par commande manquante), avec délais de connexion et code HTTP journalisé ; journal de simulation sans fuite de cache.
+- **Limite Hoymiles** : un soutirage inférieur au bruit de mesure (50 W) ne remet plus la limite au maximum ; une montée de la Tesla suivant un palier n'est plus prise pour un réglage manuel ; le surplus écrêté est oublié quand le soleil passe sous la limite ; on libère la puissance du consommateur moins l'injection déjà visible ; 15 s minimum entre deux réductions critiques ; le délestage reste possible tant que la Tesla ne charge pas.
+- **Passage en simulation** : les limites Hoymiles, onduleur et charge sont remises une fois au maximum.
+- Ballon : un ballon « terminé » et chaud n'est plus compté dans l'énergie à chauffer pour la réserve de nuit.
+- Widget et simulateur : plusieurs widgets sur une page ne s'écrasent plus, noms échappés (sécurité), mises à jour regroupées, curseurs plus réactifs, libellé réseau qui ne déborde plus ; simulateur : plus de tuiles figées après un choix dans une liste, bouton « Réinitialiser » fiable, journal plus léger.
+- Pages : défauts d'un nouvel équipement appliqués (coupure à thermostat atteint cochée), champs ajoutés (min_pv, imp_off, alert_rearm, commande de seuil Tesla), champs réservés signalés, saisie des heures creuses plus robuste, documentation alignée sur le comportement réel.
+
 ## 0.10.0
 
 - **Limite Hoymiles : jamais d'injection au-delà de l'agressivité de la Tesla** (500 / 1000 / 2000 W, plus de bande de tolérance) ; avec la Tesla pas encore en charge, 500 W seulement.
@@ -62,7 +72,7 @@
 ## 0.5.0
 
 - **Tesla branchée = mode Solaire automatique** : energyManager lit si la voiture est branchée (`charge_port_latch` du plugin Tesla, détecté automatiquement depuis teslasmartcharge) et passe teslasmartcharge de Stand-By à Solaire, une seule fois par branchement. Il ne touche jamais aux modes « Non actif » et « Planifié ». Commande « Stand-by » retirée de l'équipement Tesla (Stand-By = voiture débranchée).
-- **Ballon rechauffé si l'eau redescend** : un ballon « terminé » (thermostat atteint) mais dont l'eau est repassée sous le minimum (50 °C par défaut) est de nouveau chauffé, au soleil ou en heure creuse d'après-midi, avant l'heure limite. À l'échéance, s'il est froid : OFF et alerte Discord.
+- **Ballon réchauffé si l'eau redescend** : un ballon « terminé » (thermostat atteint) mais dont l'eau est repassée sous le minimum (50 °C par défaut) est de nouveau chauffé, au soleil ou en heure creuse d'après-midi, avant l'heure limite. À l'échéance, s'il est froid : OFF et alerte Discord.
 - Température minimale du ballon : 50 °C par défaut (réglable sur l'équipement).
 - Simulateur : la Tesla se règle en Branchée / Débranchée / Non actif ; on voit energyManager la passer en Solaire.
 

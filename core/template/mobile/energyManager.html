@@ -49,7 +49,7 @@
 			<path class="flow" id="fhouse-#uid#" stroke="#4ec9b0" d="M350 125 H440"/>
 			<!-- noeuds -->
 			<g class="node pv" transform="translate(10,15)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">☀ SOLAIRE</text><text class="val" id="pv-#uid#" x="55" y="45">-- W</text></g>
-			<g class="node grid" transform="translate(10,95)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">⚡ RÉSEAU EDF</text><text class="val" id="grid-#uid#" x="55" y="45">-- W</text></g>
+			<g class="node grid" transform="translate(10,95)"><rect width="110" height="60"/><text class="lbl" id="gridl-#uid#" x="55" y="18">⚡ RÉSEAU EDF</text><text class="val" id="grid-#uid#" x="55" y="45">-- W</text></g>
 			<g class="node" transform="translate(210,105)"><rect width="140" height="40"/><text class="lbl" x="70" y="16">MULTIPLUS II</text><text id="inj-#uid#" x="70" y="33" style="font-size:12px">injection 0 W</text></g>
 			<g class="node house" transform="translate(440,95)"><rect width="110" height="60"/><text class="lbl" x="55" y="18">🏠 MAISON</text><text class="val" id="house-#uid#" x="55" y="45">-- W</text></g>
 			<g class="node bat" transform="translate(10,175)"><rect width="200" height="60"/><text class="lbl" x="100" y="18">🔋 BATTERIE 16 kWh</text><text class="val" id="bat-#uid#" x="100" y="45">-- % · -- W</text></g>
@@ -84,14 +84,37 @@
 			var el = function (id) { return document.getElementById(id + '-' + uid) }
 			var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n }
 			var fmt = function (v) { return Math.round(num(v)) + ' W' }
+			var esc = function (t) { return String(t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] }) }
+			var val = function (o) { return (o && o.value !== undefined && o.value !== null) ? o.value : (o ? o.display_value : '') }
+			// le widget a-t-il été retiré de la page (rafraîchissement du dashboard) ? alors les anciens abonnements ne font plus rien
+			var alive = function () { return !!document.getElementById('cons-' + uid) }
+			function hook(cmdId, fn) {
+				if (!cmdId || String(cmdId) === '0') { return }
+				var wrapped = function (o) { if (alive()) { fn(o) } }
+				if (jeedom.cmd && typeof jeedom.cmd.addUpdateFunction === 'function') {
+					try { jeedom.cmd.addUpdateFunction(cmdId, wrapped); return } catch (e) {}
+				}
+				var prev = jeedom.cmd.update[cmdId]
+				jeedom.cmd.update[cmdId] = function (o) {
+					if (typeof prev === 'function') { try { prev(o) } catch (e) {} }
+					wrapped(o)
+				}
+			}
+			var pendingR = null, lastHtml = ''
+			function schedule() {
+				if (pendingR) { return }
+				pendingR = setTimeout(function () { pendingR = null; render() }, 50)
+			}
 			var setFlow = function (id, value, reverseWhenPositive) {
 				var f = el(id), on = Math.abs(num(value)) > 10
 				f.setAttribute('class', 'flow' + (on ? ' on' : '') + ((on && ((num(value) > 0) === reverseWhenPositive)) ? ' rev' : ''))
 			}
 			var mark = function (id, active) { var b = el(id); if (b) { b.className = 'btn btn-xs btn-default' + (active ? ' active' : '') } }
 			function render() {
+				if (!alive()) { return }
 				el('pv').textContent = fmt(V.pv)
-				el('grid').textContent = (num(V.grid) < 0 ? 'injection ' : 'soutirage ') + fmt(Math.abs(num(V.grid)))
+				el('gridl').textContent = num(V.grid) < 0 ? '⚡ INJECTION EDF' : '⚡ SOUTIRAGE EDF'
+				el('grid').textContent = fmt(Math.abs(num(V.grid)))
 				el('house').textContent = fmt(V.house)
 				el('bat').textContent = Math.round(num(V.soc)) + ' % · ' + fmt(V.batt)
 				el('inj').textContent = 'injection ' + fmt(V.inj)
@@ -120,27 +143,29 @@
 				consumers.forEach(function (c, i) {
 					html += '<div class="tile ' + (c.status === 'ON' ? 'on' : '') + (c.piloted ? '' : ' unpiloted') + '">'
 						+ '<span class="led ' + (c.piloted ? 'g' : 'r') + '" data-i="' + i + '" title="Piloté par energyManager : cliquer pour changer"></span>'
-						+ c.name + '<b>' + Math.round(c.power) + ' W</b>' + c.status + '</div>'
+						+ esc(c.name) + '<b>' + Math.round(c.power) + ' W</b>' + esc(c.status) + '</div>'
 				})
-				document.getElementById('cons-' + uid).innerHTML = html
+				if (html !== lastHtml) { document.getElementById('cons-' + uid).innerHTML = html; lastHtml = html }
 			}
 			function bind(cmdId, key) {
-				jeedom.cmd.update[cmdId] = function (_options) { V[key] = _options.display_value; render() }
+				hook(cmdId, function (o) { V[key] = val(o); schedule() })
 			}
 			bind('#pv_id#', 'pv'); bind('#grid_id#', 'grid'); bind('#batt_id#', 'batt'); bind('#soc_id#', 'soc')
 			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#inv_limit_id#', 'inv'); bind('#charge_limit_id#', 'chg')
 			bind('#active_info_id#', 'act'); bind('#threshold_info_id#', 'thr'); bind('#reserve_info_id#', 'rsv'); bind('#reserve_auto_info_id#', 'rauto'); bind('#reserve_text_id#', 'rtxt'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
 			consumers.forEach(function (c, i) {
-				if (c.power_id) { jeedom.cmd.update[c.power_id] = function (o) { consumers[i].power = num(o.display_value); render() } }
-				if (c.piloted_id) { jeedom.cmd.update[c.piloted_id] = function (o) { consumers[i].piloted = (String(o.display_value) !== '0') ? 1 : 0; render() } }
-				if (c.status_id) { jeedom.cmd.update[c.status_id] = function (o) { consumers[i].status = o.display_value; render() } }
+				hook(c.power_id, function (o) { consumers[i].power = num(val(o)); schedule() })
+				hook(c.piloted_id, function (o) { consumers[i].piloted = (String(val(o)) !== '0') ? 1 : 0; schedule() })
+				hook(c.status_id, function (o) { consumers[i].status = val(o); schedule() })
 			})
 			var act = function (id, cmdId) { el(id).onclick = function () { jeedom.cmd.execute({ id: cmdId }) } }
 			act('bpt', '#prio_tesla_id#'); act('bpb', '#prio_battery_id#'); act('b95', '#target_95_id#'); act('b100', '#target_100_id#')
 			act('bson', '#sim_on_id#'); act('bsoff', '#sim_off_id#')
 			el('rauto').onclick = function () { jeedom.cmd.execute({ id: (String(V.rauto) !== '0') ? '#reserve_auto_off_id#' : '#reserve_auto_on_id#' }) }
-			el('thr').onchange = function () { V.thr = this.value; render(); jeedom.cmd.execute({ id: '#threshold_set_id#', value: { slider: this.value } }) }
-			el('rsv').onchange = function () { V.rsv = this.value; render(); jeedom.cmd.execute({ id: '#reserve_set_id#', value: { slider: this.value } }) }
+			el('thr').oninput = function () { V.thr = this.value; el('thrv').textContent = Math.round(num(this.value)) + ' %' }
+			el('rsv').oninput = function () { V.rsv = this.value; el('rsvv').textContent = Math.round(num(this.value)) + ' %' }
+			el('thr').onchange = function () { V.thr = this.value; jeedom.cmd.execute({ id: '#threshold_set_id#', value: { slider: this.value } }); this.blur(); render() }
+			el('rsv').onchange = function () { V.rsv = this.value; jeedom.cmd.execute({ id: '#reserve_set_id#', value: { slider: this.value } }); this.blur(); render() }
 			el('led').onclick = function () { jeedom.cmd.execute({ id: (String(V.act) !== '0') ? '#active_off_id#' : '#active_on_id#' }) }
 			document.getElementById('cons-' + uid).onclick = function (ev) {
 				var t = ev.target

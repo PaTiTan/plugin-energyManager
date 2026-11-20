@@ -25,6 +25,20 @@ $('#sel_emType').off('change').on('change', emShowType)
 $('.eqLogicAction[data-action=add]').on('click', function () { setTimeout(emShowType, 300) })
 $('.eqLogicDisplayCard').on('click', function () { setTimeout(emShowType, 500) })
 
+/* Appelé par Jeedom à l'ouverture d'un équipement : défauts des champs vides et affichage du bon type */
+function printEqLogic(_eqLogic) {
+  var c = (_eqLogic && _eqLogic.configuration) ? _eqLogic.configuration : {}
+  var unset = function (v) { return v === undefined || v === null || v === '' }
+  var f = function (k) { return $('.eqLogicAttr[data-l1key=configuration][data-l2key=' + k + ']') }
+  if (unset(c.cut_on_zero)) { f('cut_on_zero').prop('checked', true) }
+  if (unset(c.priority)) { f('priority').val('2') }
+  if (unset(c.aggressiveness)) { f('aggressiveness').val('medium') }
+  if (unset(c.eqType)) { $('#sel_emType').val('simple') }
+  var isManager = (c.eqType === 'manager')
+  $('#sel_emType option').each(function () { var m = ($(this).attr('value') === 'manager'); $(this).prop('disabled', isManager ? !m : m) })
+  emShowType()
+}
+
 /* Sélecteur de commande des champs de l'équipement */
 $('body').off('click', '.emEqCmdPick').on('click', '.emEqCmdPick', function () {
   var input = $(this).closest('.input-group').find('input')

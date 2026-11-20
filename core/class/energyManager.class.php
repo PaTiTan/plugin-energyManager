@@ -26,10 +26,67 @@ class energyManager extends eqLogic {
 
 	/* ************************** Configuration ************************* */
 
+	/** Mémo de la configuration du plugin, valable le temps d'un cycle (une seule requête au lieu d'une par paramètre). */
+	private static $cfgMemo = null;
+
 	/** Lecture d'un paramètre du plugin avec valeur par défaut (même si la clé est vide). */
 	public static function cfg($_key, $_default = '') {
-		$v = config::byKey($_key, 'energyManager', '');
+		if (is_array(self::$cfgMemo)) {
+			$v = array_key_exists($_key, self::$cfgMemo) ? self::$cfgMemo[$_key] : '';
+		} else {
+			$v = config::byKey($_key, 'energyManager', '');
+		}
 		return ($v === '' || $v === null) ? $_default : $v;
+	}
+
+	/** Charge toute la configuration du plugin en mémoire pour la durée d'un cycle ; false si la lecture est impossible. */
+	private static function loadCfgMemo() {
+		self::$cfgMemo = null;
+		try {
+			$rows = DB::Prepare('SELECT `key`, `value` FROM `config` WHERE `plugin` = :plugin', array('plugin' => 'energyManager'), DB::FETCH_TYPE_ALL);
+			if (!is_array($rows)) {
+				return false;
+			}
+			$m = array();
+			foreach ($rows as $r) {
+				$v = $r['value'];
+				if (is_string($v) && $v !== '' && ($v[0] === '{' || $v[0] === '[')) {
+					$d = json_decode($v, true);
+					if (is_array($d)) {
+						$v = $d;
+					}
+				}
+				$m[$r['key']] = $v;
+			}
+			self::$cfgMemo = $m;
+			return true;
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Lecture de la configuration : ' . $e->getMessage());
+			return false;
+		}
+	}
+
+	/** Exécute une étape du cycle en isolant ses erreurs : une étape en échec n'empêche pas les suivantes. */
+	private static function guard($_label, $_fn) {
+		try {
+			$_fn();
+			return true;
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', $_label . ' : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+			return false;
+		}
+	}
+
+	/** Dernière valeur envoyée à un équipement de limite (repli quand le retour d'information n'est pas configuré). */
+	private static function lastSent($_name, $_default) {
+		$v = cache::byKey('energyManager::last_sent::' . $_name)->getValue('');
+		return is_numeric($v) ? (float) $v : (float) $_default;
+	}
+
+	/** Échappe une valeur pour l'insérer dans une chaîne JavaScript entre apostrophes ou guillemets. */
+	private static function jsStr($_v) {
+		$j = json_encode((string) $_v, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		return ($j === false || strlen($j) < 2) ? '' : substr($j, 1, -1);
 	}
 
 	/** Résout une commande depuis sa forme humaine (#[Objet][Equipement][Commande]#). */
@@ -37,7 +94,11 @@ class energyManager extends eqLogic {
 		if (!is_string($_human) || trim($_human) === '') {
 			return null;
 		}
-		$cmd = cmd::byString($_human);
+		try {
+			$cmd = cmd::byString($_human);
+		} catch (Throwable $e) {
+			return null;
+		}
 		return is_object($cmd) ? $cmd : null;
 	}
 
@@ -50,7 +111,11 @@ class energyManager extends eqLogic {
 		if ($cmd === null || $cmd->getType() != 'info') {
 			return null;
 		}
-		$value = $cmd->execCmd();
+		try {
+			$value = $cmd->execCmd();
+		} catch (Throwable $e) {
+			return null;
+		}
 		$date = $cmd->getCollectDate();
 		$age = ($date === '' || $date === null) ? 0 : max(0, time() - strtotime($date));
 		return array('value' => $value, 'age' => $age);
@@ -126,6 +191,10 @@ class energyManager extends eqLogic {
 		} catch (Throwable $e) {
 			// Throwable : attrape aussi les erreurs PHP (TypeError...), sinon le démon s'arrête sans rien dire
 			log::add('energyManager', 'error', 'Cycle en erreur : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+			try {
+				self::sendAlert('cycle_error', 'critical', 'Cycle du démon en erreur : ' . $e->getMessage(), time());
+			} catch (Throwable $e2) {
+			}
 		}
 	}
 
@@ -136,111 +205,157 @@ class energyManager extends eqLogic {
 	 * @param bool $_dry true : ne rien envoyer (utilisé par le simulateur côté serveur)
 	 */
 	public static function runCycle($_dry = false) {
-		$now = time();
-		$staleAge = (int) self::cfg('stale_age', 300);
-		$stale = array();
-		$ignored = array();
-		$simulation = $_dry || (int) self::cfg('simulation', 1) === 1;
-
-		$minute = (int) date('G', $now) * 60 + (int) date('i', $now);
-		$hcI = self::hcInfo($minute);
-		$slot = $hcI['slot'];
-		$hcAfternoon = $hcI['afternoon'];
-		$hcAfternoonEnd = $hcI['afternoon_end'];
-
-		$state = array(
-			'now' => $now, 'minute' => $minute,
-			'grid' => self::measure('cmd_grid', $stale, $staleAge),
-			'pv' => self::measure('cmd_pv', $stale, $staleAge),
-			// le SOC bouge peu : pas de contrôle d'âge par défaut (stale_age_soc = 0), seule son absence bloque
-			'soc' => self::measure('cmd_soc', $stale, (int) self::cfg('stale_age_soc', 0)),
-			// batterie et maison sont informatives : leur absence ne bloque pas le pilotage
-			'batt' => self::measure('cmd_batt', $ignored, $staleAge),
-			'house' => self::measure('cmd_house', $ignored, $staleAge),
-			'stale' => $stale,
-			'hc' => ($slot === 'HC'), 'hc_afternoon' => $hcAfternoon,
-			'cfg' => self::engineConfig(),
-			'equips' => array(),
-			'mem' => self::cacheJson('energyManager::mem'),
-		);
-		// seuls les équipements "pilotés" (voyant vert) sont confiés au moteur ; les autres restent juste mesurés
-		$state['all_equips'] = self::buildEquips($now, $minute, $hcAfternoonEnd);
-		foreach ($state['all_equips'] as $e) {
-			if ($e['piloted']) {
-				$state['equips'][] = $e;
-			}
-		}
-		$active = ((int) self::cfg('pilot_active', 1) === 1);
+		$cfgOk = self::loadCfgMemo(); // la configuration est lue une seule fois pour tout le cycle
 		try {
-			self::learnNight($state, $now, $minute); // apprentissage de la consommation de nuit (indépendant du pilotage)
-		} catch (Throwable $e) {
-			log::add('energyManager', 'error', 'Apprentissage de la nuit : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
-		}
-		$fc = self::readCmd(self::cfg('cmd_forecast_kwh'));
-		$state['forecast_kwh'] = ($fc !== null && is_numeric($fc['value'])) ? (float) $fc['value'] : null;
-		$inv = self::readCmd(self::cfg('cmd_inv_limit_fb'));
-		$state['inv_limit'] = ($inv !== null && is_numeric($inv['value'])) ? (float) $inv['value'] : (float) $state['cfg']['inv_max'];
-		$hoy = self::readCmd(self::cfg('cmd_hoy_limit_fb'));
-		$chg = self::readCmd(self::cfg('cmd_charge_limit_fb'));
-		$state['hoy_limit'] = ($hoy !== null && is_numeric($hoy['value'])) ? (float) $hoy['value'] : (float) $state['cfg']['hoy_max'];
-		$state['charge_limit'] = ($chg !== null && is_numeric($chg['value'])) ? (float) $chg['value'] : (float) $state['cfg']['charge_max'];
-
-		if (!$active) {
-			// interrupteur général rouge : on mesure et on affiche, mais aucune décision, aucun ordre, aucune alerte
-			$result = array('actions' => array(), 'alerts' => array(), 'mem' => array(),
-				'info' => array('decision' => 'Pilotage désactivé (interrupteur rouge)'));
-			cache::set('energyManager::mem', '{}');
-			if (!$simulation) {
-				self::safeState($state, $now);
+			$now = time();
+			$staleAge = (int) self::cfg('stale_age', 300);
+			$stale = array();
+			$ignored = array();
+			// configuration illisible : on ne sait pas si la simulation est voulue, donc aucun ordre
+			$simulation = $_dry || !$cfgOk || (int) self::cfg('simulation', 1) === 1;
+			if (!$cfgOk) {
+				self::guard('Alerte configuration', function () use ($now) {
+					self::sendAlert('cfg_read', 'critical', 'Lecture de la configuration impossible : cycle exécuté en simulation (aucun ordre).', $now);
+				});
 			}
-			self::mirror($state, $result, $slot, $simulation);
-			self::handleAlerts(array(), $now);
-			return $result;
-		}
-		if ((int) cache::byKey('energyManager::safe_done')->getValue(0) === 1) {
-			cache::set('energyManager::safe_done', 0); // pilotage réactivé : le prochain passage au rouge refera le retour à l'état sûr
-		}
 
-		$result = energyManagerEngine::decide($state);
-		cache::set('energyManager::mem', json_encode($result['mem']));
+			$minute = (int) date('G', $now) * 60 + (int) date('i', $now);
+			$hcI = self::hcInfo($minute);
+			$slot = $hcI['slot'];
+			$hcAfternoon = $hcI['afternoon'];
+			$hcAfternoonEnd = $hcI['afternoon_end'];
 
-		// post-traitement ballon : thermostat atteint = consommation retombée à zéro
-		self::ecsThermostatWatch($state['equips'], $now, $simulation, $result);
-
-		self::mirror($state, $result, $slot, $simulation);
-
-		foreach ($result['actions'] as $a) {
-			if ($simulation && $a['type'] === 'tesla_mode') {
-				$sk = 'energyManager::tesla_sim_logged::' . $a['id'];
-				if ((int) cache::byKey($sk)->getValue(0) === 1) {
-					continue;
+			$state = array(
+				'now' => $now, 'minute' => $minute,
+				'grid' => self::measure('cmd_grid', $stale, $staleAge),
+				'pv' => self::measure('cmd_pv', $stale, $staleAge),
+				// le SOC bouge peu : pas de contrôle d'âge par défaut (stale_age_soc = 0), seule son absence bloque
+				'soc' => self::measure('cmd_soc', $stale, (int) self::cfg('stale_age_soc', 0)),
+				// batterie et maison sont informatives : leur absence ne bloque pas le pilotage
+				'batt' => self::measure('cmd_batt', $ignored, $staleAge),
+				'house' => self::measure('cmd_house', $ignored, $staleAge),
+				'stale' => $stale,
+				'hc' => ($slot === 'HC'), 'hc_afternoon' => $hcAfternoon,
+				'cfg' => self::engineConfig(),
+				'equips' => array(),
+				'mem' => self::cacheJson('energyManager::mem'),
+			);
+			// seuls les équipements "pilotés" (voyant vert) sont confiés au moteur ; les autres restent juste mesurés
+			$state['all_equips'] = self::buildEquips($now, $minute, $hcAfternoonEnd);
+			foreach ($state['all_equips'] as $e) {
+				if ($e['piloted']) {
+					$state['equips'][] = $e;
 				}
-				cache::set($sk, 1);
 			}
-			$line = self::describeAction($a);
+			$active = ((int) self::cfg('pilot_active', 1) === 1);
+			try {
+				self::learnNight($state, $now, $minute); // apprentissage de la consommation de nuit (indépendant du pilotage)
+			} catch (Throwable $e) {
+				log::add('energyManager', 'error', 'Apprentissage de la nuit : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+			}
+			$fc = self::readCmd(self::cfg('cmd_forecast_kwh'));
+			$state['forecast_kwh'] = ($fc !== null && is_numeric($fc['value'])) ? (float) $fc['value'] : null;
+			// retour d'information absent ou illisible : on se replie sur la dernière valeur réellement envoyée (sinon le maximum)
+			$inv = self::readCmd(self::cfg('cmd_inv_limit_fb'));
+			$state['inv_limit'] = ($inv !== null && is_numeric($inv['value'])) ? (float) $inv['value'] : self::lastSent('inv', $state['cfg']['inv_max']);
+			$hoy = self::readCmd(self::cfg('cmd_hoy_limit_fb'));
+			$chg = self::readCmd(self::cfg('cmd_charge_limit_fb'));
+			$state['hoy_limit'] = ($hoy !== null && is_numeric($hoy['value'])) ? (float) $hoy['value'] : self::lastSent('hoy', $state['cfg']['hoy_max']);
+			$state['charge_limit'] = ($chg !== null && is_numeric($chg['value'])) ? (float) $chg['value'] : self::lastSent('charge', $state['cfg']['charge_max']);
+
+			if (!$active) {
+				// interrupteur général rouge : on mesure et on affiche, mais aucune décision, aucun ordre, aucune alerte
+				$result = array('actions' => array(), 'alerts' => array(), 'mem' => array(),
+					'info' => array('decision' => 'Pilotage désactivé (interrupteur rouge)'));
+				cache::set('energyManager::mem', '{}');
+				if (!$simulation) {
+					self::guard('Retour à l\'état sûr', function () use ($state, $now) {
+						self::safeState($state, $now);
+					});
+				}
+				self::guard('Recopie des mesures', function () use ($state, $result, $slot, $simulation) {
+					self::mirror($state, $result, $slot, $simulation);
+				});
+				self::guard('Alertes', function () use ($now) {
+					self::handleAlerts(array(), $now);
+				});
+				return $result;
+			}
+			if ((int) cache::byKey('energyManager::safe_done')->getValue(0) === 1) {
+				cache::set('energyManager::safe_done', 0); // pilotage réactivé : le prochain passage au rouge refera le retour à l'état sûr
+			}
+
+			$result = energyManagerEngine::decide($state);
+			cache::set('energyManager::mem', json_encode($result['mem']));
+
+			// post-traitement ballon : thermostat atteint = consommation retombée à zéro
+			self::guard('Surveillance du thermostat du ballon', function () use ($state, $now, $simulation, &$result) {
+				self::ecsThermostatWatch($state['equips'], $now, $simulation, $result);
+			});
+
+			// en simulation rien n'est envoyé, donc le même ordre revient à chaque cycle : on ne le journalise que toutes les 5 minutes
+			$simlog = self::cacheJson('energyManager::simlog');
+			foreach ($simlog as $sk => $st) {
+				if (!is_numeric($st) || ($now - (int) $st) >= 300) {
+					unset($simlog[$sk]);
+				}
+			}
+			foreach ($result['actions'] as $a) {
+				if ($simulation && $a['type'] === 'tesla_mode') {
+					$sk = 'energyManager::tesla_sim_logged::' . $a['id'];
+					if ((int) cache::byKey($sk)->getValue(0) === 1) {
+						continue;
+					}
+					cache::set($sk, 1);
+				}
+				$line = self::describeAction($a);
+				if ($simulation) {
+					$sig = md5($a['type'] . '|' . (isset($a['id']) ? $a['id'] : '') . '|' . (isset($a['cmd']) ? $a['cmd'] : '') . '|' . (isset($a['value']) ? $a['value'] : ''));
+					if (isset($simlog[$sig])) {
+						continue;
+					}
+					$simlog[$sig] = $now;
+				}
+				log::add('energyManager', $simulation ? 'info' : 'debug', ($simulation ? '[SIMULATION] ' : '') . $line);
+				if (!$simulation) {
+					try {
+						self::applyAction($a, $now);
+					} catch (Throwable $e) {
+						log::add('energyManager', 'error', 'Ordre en échec : ' . $line . ' : ' . $e->getMessage());
+						self::sendAlert('order_' . $a['type'] . (isset($a['id']) ? '_' . $a['id'] : ''), 'critical', 'Ordre non exécuté (' . $line . ') : ' . $e->getMessage(), $now);
+					}
+				}
+			}
 			if ($simulation) {
-				// en simulation rien n'est envoyé, donc le même ordre revient à chaque cycle : on ne le journalise que toutes les 5 minutes
-				$lk = 'energyManager::simlog::' . md5($line);
-				if (($now - (int) cache::byKey($lk)->getValue(0)) < 300) {
-					continue;
-				}
-				cache::set($lk, $now);
+				cache::set('energyManager::simlog', json_encode($simlog));
 			}
-			log::add('energyManager', $simulation ? 'info' : 'debug', ($simulation ? '[SIMULATION] ' : '') . $line);
 			if (!$simulation) {
-				self::applyAction($a, $now);
+				self::guard('Priorité Tesla', function () {
+					self::syncTeslaPriority();
+				});
+				self::guard('Seuil Tesla', function () {
+					self::syncTeslaThreshold();
+				});
 			}
+			self::guard('Vérification des retours', function () use ($now) {
+				self::checkFeedback($now);
+			});
+			if (!$simulation) {
+				// la question Discord est un ordre : pas en simulation
+				self::guard('Question Discord du ballon', function () use ($state, $minute, $hcAfternoonEnd) {
+					self::ecsAsk($state['equips'], $minute, $hcAfternoonEnd);
+				});
+			}
+			self::guard('Recopie des mesures', function () use ($state, $result, $slot, $simulation) {
+				self::mirror($state, $result, $slot, $simulation);
+			});
+			self::guard('Alertes', function () use ($result, $now) {
+				self::handleAlerts($result['alerts'], $now);
+			});
+			return $result;
+		} finally {
+			self::$cfgMemo = null;
 		}
-		if (!$simulation) {
-			self::syncTeslaPriority();
-			self::syncTeslaThreshold();
-		}
-		self::checkFeedback($now);
-		if (!$simulation) {
-			self::ecsAsk($state['equips'], $minute, $hcAfternoonEnd); // la question Discord est un ordre : pas en simulation
-		}
-		self::handleAlerts($result['alerts'], $now);
-		return $result;
 	}
 
 	/**
@@ -331,7 +446,7 @@ class energyManager extends eqLogic {
 
 	/** Historique des consommations de nuit (kWh), texte "5.2;4.8;..." (jamais du JSON : Jeedom le décoderait). */
 	public static function nightHistory() {
-		$raw = config::byKey('night_history', 'energyManager', '');
+		$raw = self::cfg('night_history', '');
 		if (is_array($raw)) {
 			$raw = implode(';', $raw);
 		}
@@ -432,6 +547,9 @@ class energyManager extends eqLogic {
 				$h[] = round($wh / 1000, 2);
 				$h = array_slice($h, -14);
 				config::save('night_history', implode(';', $h), 'energyManager');
+				if (is_array(self::$cfgMemo)) {
+					self::$cfgMemo['night_history'] = implode(';', $h);
+				}
 				log::add('energyManager', 'info', 'Nuit mesurée : ' . round($wh / 1000, 2) . ' kWh sur ' . round($duration / 3600, 1) . ' h. Réserve de nuit : ' . self::reserveText());
 			} else {
 				log::add('energyManager', 'info', 'Nuit ignorée (trop courte ou mal mesurée) : ' . round($wh / 1000, 2) . ' kWh, ' . round($duration / 3600, 1) . ' h, mesures sur ' . round($sec / 3600, 1) . ' h.');
@@ -447,7 +565,12 @@ class energyManager extends eqLogic {
 		if ((int) cache::byKey('energyManager::safe_done')->getValue(0) === 1) {
 			return;
 		}
-		cache::set('energyManager::safe_done', 1);
+		// pas plus d'une tentative par minute (si un ordre échoue, on réessaie au cycle suivant après ce délai)
+		if (time() - (int) cache::byKey('energyManager::safe_try')->getValue(0) < 60) {
+			return;
+		}
+		cache::set('energyManager::safe_try', time());
+		$ok = true;
 		$cfg = $_state['cfg'];
 		$todo = array(
 			array('type' => 'hoymiles', 'value' => $cfg['hoy_max'], 'cur' => $_state['hoy_limit']),
@@ -458,7 +581,43 @@ class energyManager extends eqLogic {
 			if ((float) $a['cur'] < (float) $a['value'] - 5) {
 				$a['reason'] = 'pilotage désactivé : limite remise à sa valeur maximale';
 				log::add('energyManager', 'info', self::describeAction($a));
-				self::applyAction($a, $_now);
+				try {
+					if (self::applyAction($a, $_now) === false) {
+						$ok = false; // commande de pilotage absente : rien n'a été remis au maximum, on réessaiera
+					}
+				} catch (Throwable $e) {
+					$ok = false;
+					log::add('energyManager', 'error', 'Retour à l\'état sûr : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+				}
+			}
+		}
+		if ($ok) {
+			cache::set('energyManager::safe_done', 1);
+		}
+	}
+
+	/**
+	 * Remet les limites que le plugin a pu réduire (Hoymiles, onduleur Victron, charge batterie) à leur valeur maximale.
+	 * Utilisé au passage en simulation : ordre unique et volontaire, car ensuite plus aucun ordre ne partira.
+	 */
+	public static function restoreLimits($_reason) {
+		$cfg = self::engineConfig();
+		$todo = array(
+			array('type' => 'hoymiles', 'value' => $cfg['hoy_max'], 'fb' => 'cmd_hoy_limit_fb', 'name' => 'hoy'),
+			array('type' => 'inv_limit', 'value' => $cfg['inv_max'], 'fb' => 'cmd_inv_limit_fb', 'name' => 'inv'),
+			array('type' => 'charge_limit', 'value' => $cfg['charge_max'], 'fb' => 'cmd_charge_limit_fb', 'name' => 'charge'),
+		);
+		foreach ($todo as $a) {
+			try {
+				$fb = self::readCmd(self::cfg($a['fb']));
+				$cur = ($fb !== null && is_numeric($fb['value'])) ? (float) $fb['value'] : self::lastSent($a['name'], $a['value']);
+				if ($cur < (float) $a['value'] - 5) {
+					$a['reason'] = $_reason;
+					log::add('energyManager', 'info', self::describeAction($a));
+					self::applyAction($a, time());
+				}
+			} catch (Throwable $e) {
+				log::add('energyManager', 'error', 'Remise des limites : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 			}
 		}
 	}
@@ -510,9 +669,23 @@ class energyManager extends eqLogic {
 			$st = self::readCmd($eq->getConfiguration('cmd_state'));
 			$power = ($pr !== null && is_numeric($pr['value'])) ? (float) $pr['value'] : 0;
 			$zero = (float) $eq->getConfiguration('zero_threshold', 20);
-			if ($st !== null && $st['value'] !== '') {
-				$isOn = ((int) $st['value'] === 1);
-			} else {
+			$isOn = null;
+			if ($st !== null) {
+				$sv = $st['value'];
+				if (is_bool($sv)) {
+					$isOn = $sv;
+				} elseif (is_numeric($sv)) {
+					$isOn = ((float) $sv > 0);
+				} elseif (is_string($sv)) {
+					$sl = mb_strtolower(trim($sv));
+					if (in_array($sl, array('on', 'true'), true)) {
+						$isOn = true;
+					} elseif (in_array($sl, array('off', 'false'), true)) {
+						$isOn = false;
+					}
+				}
+			}
+			if ($isOn === null) {
 				$isOn = ($power > $zero);
 			}
 			$e = array(
@@ -535,8 +708,8 @@ class energyManager extends eqLogic {
 				$t = self::readCmd($eq->getConfiguration('cmd_water_temp'));
 				$e['water_temp'] = ($t !== null && is_numeric($t['value'])) ? (float) $t['value'] : null;
 				$e['min_temp'] = (float) $eq->getConfiguration('min_temp', 50);
-				$e['done_today'] = (cache::byKey('energyManager::ecs_done::' . $eq->getId())->getValue('') === date('Ymd'));
-				$e['force_edf'] = (cache::byKey('energyManager::ecs_force::' . $eq->getId())->getValue('') === date('Ymd'));
+				$e['done_today'] = ((string) cache::byKey('energyManager::ecs_done::' . $eq->getId())->getValue('') === date('Ymd'));
+				$e['force_edf'] = ((string) cache::byKey('energyManager::ecs_force::' . $eq->getId())->getValue('') === date('Ymd'));
 				$e['zero_threshold'] = $zero;
 				$e['cut_on_zero'] = (int) $eq->getConfiguration('cut_on_zero', 1);
 				$e['forecast_poor'] = self::forecastPoor();
@@ -554,9 +727,12 @@ class energyManager extends eqLogic {
 				$e['aggr_w'] = isset($aggr[$ag]) ? $aggr[$ag] : 1000;
 				$e['plug_handled'] = ((int) cache::byKey('energyManager::tesla_plug_handled::' . $eq->getId())->getValue(0) === 1);
 				if ($e['plugged'] === false) {
-					// débranchée : le prochain branchement sera de nouveau pris en charge
-					cache::set('energyManager::tesla_plug_handled::' . $eq->getId(), 0);
-					cache::set('energyManager::tesla_sim_logged::' . $eq->getId(), 0);
+					// débranchée : le prochain branchement sera de nouveau pris en charge (on n'écrit que si nécessaire)
+					foreach (array('energyManager::tesla_plug_handled::', 'energyManager::tesla_sim_logged::') as $ck) {
+						if ((int) cache::byKey($ck . $eq->getId())->getValue(0) !== 0) {
+							cache::set($ck . $eq->getId(), 0);
+						}
+					}
 					$e['plug_handled'] = false;
 				}
 			}
@@ -638,7 +814,7 @@ class energyManager extends eqLogic {
 				if (isset($stat['avg']) && is_numeric($stat['avg']) && $stat['avg'] !== '') {
 					$avg = (float) $stat['avg'];
 				}
-			} catch (Exception $e) {
+			} catch (Throwable $e) {
 			}
 			if ($avg === null && is_numeric($cmd->execCmd())) {
 				$avg = (float) $cmd->execCmd();
@@ -719,7 +895,7 @@ class energyManager extends eqLogic {
 				continue;
 			}
 			$k = 'energyManager::ecs_asked::' . $e['id'];
-			if (cache::byKey($k)->getValue('') === date('Ymd')) {
+			if ((string) cache::byKey($k)->getValue('') === date('Ymd')) {
 				continue;
 			}
 			cache::set($k, date('Ymd'));
@@ -736,7 +912,7 @@ class energyManager extends eqLogic {
 						'timeout' => 7200,
 						'cmd' => $answerCmd->getId(),
 					));
-				} catch (Exception $ex) {
+				} catch (Throwable $ex) {
 					log::add('energyManager', 'error', 'Ask Discord impossible : ' . $ex->getMessage());
 				}
 			}
@@ -769,12 +945,12 @@ class energyManager extends eqLogic {
 			case 'equip':
 				$eq = eqLogic::byId($a['id']);
 				if (!is_object($eq)) {
-					return;
+					return false;
 				}
 				$cmd = self::resolveCmd($eq->getConfiguration($a['cmd'] === 'on' ? 'cmd_on' : 'cmd_off'));
 				if ($cmd === null) {
-					self::notify('critical', 'Commande ' . $a['cmd'] . ' introuvable pour « ' . $eq->getName() . ' ».');
-					return;
+					self::sendAlert('missing_cmd_' . $a['type'] . '_' . $a['id'], 'critical', 'Commande ' . $a['cmd'] . ' introuvable pour « ' . $eq->getName() . ' ».', $_now);
+					return false;
 				}
 				$cmd->execCmd();
 				cache::set('energyManager::last_order::' . $a['id'], json_encode(array('cmd' => $a['cmd'], 't' => $_now)));
@@ -783,37 +959,37 @@ class energyManager extends eqLogic {
 			case 'tesla_mode':
 				$te = eqLogic::byId($a['id']);
 				if (!is_object($te)) {
-					return;
+					return false;
 				}
 				$mc = self::resolveCmd($te->getConfiguration('cmd_set_mode'));
 				if ($mc === null) {
-					self::notify('critical', 'Commande set_mode de teslasmartcharge introuvable pour « ' . $te->getName() . ' ».');
-					return;
+					self::sendAlert('missing_cmd_' . $a['type'] . '_' . $a['id'], 'critical', 'Commande set_mode de teslasmartcharge introuvable pour « ' . $te->getName() . ' ».', $_now);
+					return false;
 				}
 				$mc->execCmd(array('select' => $a['value']));
 				cache::set('energyManager::tesla_plug_handled::' . $a['id'], 1);
 				$te->checkAndUpdateCmd('mode_info', $a['value']);
 				break;
 			case 'hoymiles':
-				self::sendSlider('cmd_hoy_limit', $a['value'], 'hoy', $_now);
-				break;
+				return self::sendSlider('cmd_hoy_limit', $a['value'], 'hoy', $_now);
 			case 'inv_limit':
-				self::sendSlider('cmd_inv_limit', $a['value'], 'inv', $_now);
-				break;
+				return self::sendSlider('cmd_inv_limit', $a['value'], 'inv', $_now);
 			case 'charge_limit':
-				self::sendSlider('cmd_charge_limit', $a['value'], 'charge', $_now);
-				break;
+				return self::sendSlider('cmd_charge_limit', $a['value'], 'charge', $_now);
 		}
+		return true;
 	}
 
 	private static function sendSlider($_cfgKey, $_value, $_fbName, $_now) {
 		$cmd = self::resolveCmd(self::cfg($_cfgKey));
 		if ($cmd === null) {
-			self::notify('critical', 'Commande de pilotage « ' . $_cfgKey . ' » non configurée.');
-			return;
+			self::sendAlert('missing_cmd_' . $_cfgKey, 'critical', 'Commande de pilotage « ' . $_cfgKey . ' » non configurée.', $_now);
+			return false;
 		}
 		$cmd->execCmd(array('slider' => $_value));
+		cache::set('energyManager::last_sent::' . $_fbName, $_value);
 		cache::set('energyManager::pending::' . $_fbName, json_encode(array('value' => $_value, 't' => $_now)));
+		return true;
 	}
 
 	/**
@@ -830,7 +1006,7 @@ class energyManager extends eqLogic {
 				continue;
 			}
 			$key = 'energyManager::tesla_prio::' . $eq->getId();
-			if (cache::byKey($key)->getValue('') === $wanted) {
+			if ((string) cache::byKey($key)->getValue('') === $wanted) {
 				continue;
 			}
 			$cmd = self::resolveCmd($eq->getConfiguration('cmd_set_priority'));
@@ -902,7 +1078,7 @@ class energyManager extends eqLogic {
 			if (!empty($al['once'])) {
 				// alerte unique par jour (ex. ballon non chaud à l'échéance) : pas de boucle
 				$k = 'energyManager::once::' . $al['key'];
-				if (cache::byKey($k)->getValue('') !== date('Ymd')) {
+				if ((string) cache::byKey($k)->getValue('') !== date('Ymd')) {
 					cache::set($k, date('Ymd'));
 					self::notify($al['level'], $al['message']);
 				}
@@ -915,14 +1091,18 @@ class energyManager extends eqLogic {
 			// pour éviter qu'un problème qui clignote ne renvoie un message Discord à chaque va-et-vient
 			$ck = 'energyManager::alert_clear::' . $k;
 			if (isset($active[$k])) {
-				cache::set($ck, 0);
+				if ((int) cache::byKey($ck)->getValue(0) !== 0) {
+					cache::set($ck, 0);
+				}
 				continue;
 			}
 			$since = (int) cache::byKey($ck)->getValue(0);
 			if ($since === 0) {
 				cache::set($ck, $_now);
 			} elseif (($_now - $since) >= (int) self::cfg('alert_rearm', 120)) {
-				cache::set('energyManager::alert::' . $k, 0);
+				if ((int) cache::byKey('energyManager::alert::' . $k)->getValue(0) !== 0) {
+					cache::set('energyManager::alert::' . $k, 0);
+				}
 			}
 		}
 	}
@@ -949,20 +1129,42 @@ class energyManager extends eqLogic {
 	/** Message Jeedom + webhook Discord d'urgence. */
 	public static function notify($_level, $_message) {
 		log::add('energyManager', $_level === 'critical' ? 'error' : 'warning', $_message);
-		message::add('energyManager', $_message);
+		try {
+			message::add('energyManager', $_message);
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Message Jeedom impossible : ' . $e->getMessage());
+		}
 		$hook = trim((string) self::cfg('discord_webhook', ''));
 		if ($hook === '' || strpos($hook, 'https://discord.com/api/webhooks/') !== 0) {
 			return;
 		}
-		$mention = self::discordMention();
-		$payload = json_encode(array('content' => ($_level === 'critical' ? '🚨 ' . ($mention !== '' ? $mention . ' ' : '') : '⚠️ ') . '**Energy Manager** : ' . $_message));
-		$ch = curl_init($hook);
-		curl_setopt_array($ch, array(
-			CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_HTTPHEADER => array('Content-Type: application/json'), CURLOPT_TIMEOUT => 8,
-		));
-		curl_exec($ch);
-		curl_close($ch);
+		if (!function_exists('curl_init')) {
+			log::add('energyManager', 'warning', 'Notification Discord impossible : l\'extension PHP curl est absente.');
+			return;
+		}
+		try {
+			$mention = self::discordMention();
+			$payload = json_encode(array('content' => ($_level === 'critical' ? '🚨 ' . ($mention !== '' ? $mention . ' ' : '') : '⚠️ ') . '**Energy Manager** : ' . $_message), JSON_INVALID_UTF8_SUBSTITUTE);
+			if ($payload === false) {
+				log::add('energyManager', 'warning', 'Notification Discord impossible : message non encodable en JSON.');
+				return;
+			}
+			$ch = curl_init($hook);
+			curl_setopt_array($ch, array(
+				CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_HTTPHEADER => array('Content-Type: application/json'),
+				CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_TIMEOUT => 5,
+			));
+			curl_exec($ch);
+			$code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			$err = curl_error($ch);
+			curl_close($ch);
+			if ($code < 200 || $code >= 300) {
+				log::add('energyManager', 'warning', 'Notification Discord non remise (code HTTP ' . $code . ($err !== '' ? ', ' . $err : '') . ').');
+			}
+		} catch (Throwable $e) {
+			log::add('energyManager', 'error', 'Notification Discord en échec : ' . $e->getMessage());
+		}
 	}
 
 	/* ****************** Recopie dans les commandes Jeedom ********************* */
@@ -1138,7 +1340,8 @@ class energyManager extends eqLogic {
 			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set', 'reserve_auto_info', 'reserve_text', 'reserve_auto_on', 'reserve_auto_off', 'threshold_info', 'threshold_set') as $l) {
 			$c = $this->getCmd(null, $l);
 			$replace['#' . $l . '_id#'] = is_object($c) ? $c->getId() : 0;
-			$replace['#' . $l . '_val#'] = is_object($c) ? addslashes((string) $c->execCmd()) : '';
+			// seules les commandes INFO sont lues : execCmd() sur une commande ACTION l'EXÉCUTE (priorité, simulation, pilotage...)
+			$replace['#' . $l . '_val#'] = (is_object($c) && $c->getType() === 'info') ? self::jsStr($c->execCmd()) : '';
 		}
 		$consumers = array();
 		foreach (eqLogic::byType('energyManager', true) as $eq) {
@@ -1160,7 +1363,8 @@ class energyManager extends eqLogic {
 				'status_id' => is_object($s) ? $s->getId() : 0, 'status' => is_object($s) ? (string) $s->execCmd() : '',
 			);
 		}
-		$replace['#consumers#'] = json_encode($consumers, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+		$consumersJson = json_encode($consumers, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
+		$replace['#consumers#'] = ($consumersJson === false) ? '[]' : $consumersJson;
 		$html = template_replace($replace, getTemplate('core', $version, 'energyManager', 'energyManager'));
 		return $this->postToHtml($_version, $html);
 	}
@@ -1168,7 +1372,7 @@ class energyManager extends eqLogic {
 
 class energyManagerCmd extends cmd {
 
-	/** Pas de rendu de commande dans l'équipement principal : le widget est global. */
+	/** Les commandes info ne peuvent pas être supprimées depuis la page de configuration (elles sont recréées à l'enregistrement). */
 	public function dontRemoveCmd() {
 		return ($this->getType() == 'info');
 	}
@@ -1182,16 +1386,35 @@ class energyManagerCmd extends cmd {
 			switch ($id) {
 				case 'prio_tesla':
 					config::save('tesla_priority', 'tesla', 'energyManager');
+					$eq->checkAndUpdateCmd('tesla_priority_info', 'tesla');
 					if ((int) energyManager::cfg('simulation', 1) !== 1) { energyManager::syncTeslaPriority(); }
 					break;
 				case 'prio_battery':
 					config::save('tesla_priority', 'battery', 'energyManager');
+					$eq->checkAndUpdateCmd('tesla_priority_info', 'battery');
 					if ((int) energyManager::cfg('simulation', 1) !== 1) { energyManager::syncTeslaPriority(); }
 					break;
-				case 'target_95':    config::save('batt_target', 95, 'energyManager'); break;
-				case 'target_100':   config::save('batt_target', 100, 'energyManager'); break;
-				case 'sim_on':       config::save('simulation', 1, 'energyManager'); break;
-				case 'sim_off':      config::save('simulation', 0, 'energyManager'); break;
+				case 'target_95':
+					config::save('batt_target', 95, 'energyManager');
+					$eq->checkAndUpdateCmd('batt_target_info', 95);
+					break;
+				case 'target_100':
+					config::save('batt_target', 100, 'energyManager');
+					$eq->checkAndUpdateCmd('batt_target_info', 100);
+					break;
+				case 'sim_on':
+					$wasReal = ((int) energyManager::cfg('simulation', 1) !== 1);
+					config::save('simulation', 1, 'energyManager');
+					$eq->checkAndUpdateCmd('sim_info', 1);
+					if ($wasReal) {
+						// plus aucun ordre ne partira : on rend d'abord les limites réduites à leur valeur maximale
+						energyManager::restoreLimits('passage en simulation : limite remise à sa valeur maximale');
+					}
+					break;
+				case 'sim_off':
+					config::save('simulation', 0, 'energyManager');
+					$eq->checkAndUpdateCmd('sim_info', 0);
+					break;
 				case 'threshold_set':
 					$v = isset($_options['slider']) ? (float) $_options['slider'] : (float) energyManager::cfg('battery_threshold', 80);
 					$v = max(0, min(100, round($v)));
@@ -1263,6 +1486,10 @@ class energyManagerCmd extends cmd {
 				$target = energyManager::resolveCmd($eq->getConfiguration('cmd_set_mode'));
 				if ($target === null) {
 					throw new Exception(__('Commande set_mode de teslasmartcharge non configurée', __FILE__));
+				}
+				if ((int) energyManager::cfg('simulation', 1) === 1) {
+					log::add('energyManager', 'info', '[SIMULATION] ' . $eq->getName() . ' → mode ' . $map[$id] . ' (non envoyé)');
+					return;
 				}
 				$target->execCmd(array('select' => $map[$id]));
 				$eq->checkAndUpdateCmd('mode_info', $map[$id]);

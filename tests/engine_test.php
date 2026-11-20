@@ -110,7 +110,7 @@ check('consommateur qui démarre : on ne bride que le reste (1500 - 1000 = 500 W
 check('injection critique + consommateur dispo : démarrage', find_action($r, 'equip', array('cmd' => 'on')) !== null);
 
 // 14. Remontée de la limite quand il n'y a plus d'injection
-$r = energyManagerEngine::decide(base(array('grid' => 50, 'pv' => 3000, 'hoy_limit' => 3000)));
+$r = energyManagerEngine::decide(base(array('grid' => 120, 'pv' => 3000, 'hoy_limit' => 3000)));
 $a = find_action($r, 'hoymiles');
 check('limite relevée après soutirage', $a !== null && $a['value'] > 3000);
 
@@ -124,7 +124,7 @@ $r = energyManagerEngine::decide(base(array('cfg' => array('tesla_priority' => '
 check('priorité Tesla : charge batterie à 0', ($a = find_action($r, 'charge_limit')) !== null && $a['value'] == 0);
 
 // 17. Priorité batterie : la charge reste libre
-$r = energyManagerEngine::decide(base(array('cfg' => array('tesla_priority' => 'battery'), 'equips' => array($tesla))));
+$r = energyManagerEngine::decide(base(array('soc' => 60, 'cfg' => array('tesla_priority' => 'battery'), 'equips' => array($tesla))));
 check('priorité batterie : charge libre', find_action($r, 'charge_limit') === null);
 
 // 18. Batterie à la cible 95 % : charge stoppée
@@ -171,8 +171,9 @@ $r = energyManagerEngine::decide(base(array('grid' => -3000, 'equips' => array(r
 check('ballon avant les radiateurs', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
 
 // 24. Tesla solaire : on laisse sa marge avant de démarrer un autre consommateur
-$r = energyManagerEngine::decide(base(array('grid' => -900, 'equips' => array($tesla, rad(1)))));
-check('Tesla solaire : marge de 300 W respectée', find_action($r, 'equip', array('cmd' => 'on')) === null);
+// (priorité Batterie sous le seuil : la Tesla ne retient pas les autres, c'est bien la marge qui bloque : 900 < 1000 x 0,7 + 300)
+$r = energyManagerEngine::decide(base(array('soc' => 60, 'grid' => -900, 'cfg' => array('tesla_priority' => 'battery'), 'equips' => array($tesla, rad(1)))));
+check('marge Tesla 300 W : 900 < 700 + 300', find_action($r, 'equip', array('cmd' => 'on')) === null);
 
 // 24b. Priorité Tesla : on attend qu'elle monte plutôt que de donner le surplus à un radiateur
 $teslaSolaire = array('id' => 90, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 0, 'power_theo' => 7000, 'priority' => 1);
@@ -187,7 +188,7 @@ check('Tesla sans réaction après le délai : le radiateur démarre', find_acti
 $r = energyManagerEngine::decide(base(array('grid' => -2500, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire, rad(1)), 'mem' => array('inj_any_since' => 1000000 - 10))));
 check('grosse injection : on n\'attend pas la Tesla', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
 
-// 24e. Tesla à déclencher : 500 W d'injection tolérés (+200 de bande), pas de bridage en dessous
+// 24e. Tesla à déclencher : 500 W d'injection tolérés (budget 500 W, bande nulle), pas de bridage en dessous
 $r = energyManagerEngine::decide(base(array('grid' => -450, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
 check('Tesla à déclencher : 450 W d\'injection (budget 500 W), Hoymiles non bridé', find_action($r, 'hoymiles') === null);
 $r = energyManagerEngine::decide(base(array('grid' => -650, 'pv' => 4000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaSolaire), 'mem' => array('inj_any_since' => 1000000 - 20))));
@@ -253,7 +254,7 @@ check('avant 16 h : pas d\'alerte et chauffe EDF en HC', count($r['alerts']) ===
 $r = energyManagerEngine::decide(base(array('minute' => 17 * 60, 'pv' => 100, 'equips' => array(ecs(array('water_temp' => 45, 'force_edf' => true))))));
 check('après l\'échéance : complément EDF validé', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
 
-// 28. Hoymiles : une charge arrive (Tesla en mode solaire avec de la place) => limite remise au max IMMÉDIATEMENT
+// 28. Hoymiles : une charge arrive (Tesla en mode solaire avec de la place) => on libère un palier de 500 W (pas tout d'un coup)
 $teslaBranchee = array('id' => 92, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 0, 'power_theo' => 7000, 'priority' => 1);
 $r = energyManagerEngine::decide(base(array('pv' => 2000, 'grid' => -100, 'hoy_limit' => 2000, 'equips' => array($teslaBranchee),
 	'mem' => array('last_hoy_write' => 1000000 - 60))));
@@ -267,7 +268,7 @@ check('rien à alimenter : la limite bridée reste', find_action($r, 'hoymiles')
 // 28c. Un consommateur voudrait démarrer et le surplus masqué par le bridage suffit : limite remise au max
 $r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 2000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(rad(1)),
 	'mem' => array('hoy_hidden' => 1500, 'last_hoy_write' => 1000000 - 5))));
-check('surplus masqué : le consommateur démarre puis on libère exactement sa puissance (+1000 W)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3000
+check('surplus masqué : le consommateur démarre puis on libère +900 W (100 W déjà visibles)', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 2900
 	&& find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
 
 // 28d. Même cas sans surplus masqué : on ne rouvre pas pour rien (pas de bascule)
@@ -278,7 +279,7 @@ check('consommateur en attente sans surplus masqué : limite inchangée', find_a
 // 28e. Ballon > 50 °C : il n'est plus un consommateur à alimenter
 $r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 5000, 'grid' => -1500, 'batt' => 0,
 	'equips' => array(ecs(array('water_temp' => 51, 'min_temp' => 55))), 'mem' => array('last_start' => 1000000))));
-check('ballon > 50 °C et injection critique : limite bridée', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] < 7600);
+check('ballon qui ne peut pas démarrer (1500 < 1610 W) : limite bridée', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] < 7600);
 
 // 29. Tesla : jamais bridée. En charge à 1500 W (plage 460 W à 7200 W), grosse injection : la limite Hoymiles reste au max
 $teslaEnCharge = array('id' => 93, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 1500, 'power_theo' => 7200, 'priority' => 1);
@@ -444,7 +445,54 @@ check('batterie qui peut absorber +2680 W : libérés sur la limite', ($a = find
 $r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => -40, 'batt' => 0, 'soc' => 100, 'equips' => array())));
 check('injection de 40 W : pas de réduction', find_action($r, 'hoymiles') === null);
 
-// 25. Plages d'heures creuses (JSON du sélecteur)
+// 36. A3 : le moindre soutirage (bruit de mesure de 30 W) ne remet pas la limite au maximum
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 30, 'batt' => 3680, 'hoy_limit' => 3000, 'mem' => array('last_hoy_write' => 1000000 - 5))));
+check('soutirage de 30 W (bruit) : aucune écriture Hoymiles', find_action($r, 'hoymiles') === null);
+
+// 36b. A4 : Tesla déjà à 3000 W au tout premier cycle (aucune puissance précédente en mémoire) : pas de « réglage manuel »
+$t = array_merge($teslaEnCharge, array('power_real' => 3000));
+$r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'hoy_limit' => 3000, 'equips' => array($t), 'mem' => array('last_hoy_write' => 1000000 - 5))));
+check('premier cycle, Tesla déjà à 3000 W : pas de faux réglage manuel', find_action($r, 'hoymiles') === null);
+
+// 36c. A4 : palier légitime (+920 W < agressivité 1000 W + 300 W) : pas de réglage manuel
+$t = array_merge($teslaEnCharge, array('power_real' => 3920));
+$r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => 0, 'hoy_limit' => 4000, 'equips' => array($t), 'mem' => array('tesla_prev_w' => 3000, 'last_hoy_write' => 1000000 - 5))));
+check('palier de la Tesla (+920 W) : pas de remise au maximum', find_action($r, 'hoymiles') === null);
+
+// 36d. A5 : surplus masqué périmé (production sous la limite, nuage) : il n'autorise plus de démarrage
+$r = energyManagerEngine::decide(base(array('soc' => 100, 'pv' => 1000, 'grid' => -100, 'batt' => 0, 'hoy_limit' => 2000, 'equips' => array(rad(1)),
+	'mem' => array('hoy_hidden' => 1500, 'last_hoy_write' => 1000000 - 5))));
+check('surplus masqué périmé (pv sous la limite) : aucun démarrage', find_action($r, 'equip', array('cmd' => 'on')) === null);
+
+// 36e. A6 : configuration vide / nulle / capacité nulle : valeurs par défaut, sans erreur
+$r = energyManagerEngine::decide(base(array('cfg' => array('inj_critical' => '', 'talon' => null, 'batt_kwh' => 0), 'forecast_kwh' => 5, 'grid' => -900, 'equips' => array(rad(1)))));
+check('configuration vide ou nulle : valeurs par défaut, le radiateur démarre', find_action($r, 'equip', array('id' => 1, 'cmd' => 'on')) !== null);
+
+// 36f. A8 : délestage pendant que la Tesla est en solaire mais ne charge pas encore
+$r = energyManagerEngine::decide(base(array('grid' => 400, 'equips' => array($teslaSolaire, rad(1, array('is_on' => true, 'priority' => 1))), 'mem' => array('imp_since' => 1000000 - 60))));
+check('Tesla en solaire sans charge, soutirage durable : le radiateur est délesté', find_action($r, 'equip', array('id' => 1, 'cmd' => 'off')) !== null);
+
+// 36g. A8 : pas de délestage pendant que la Tesla charge réellement
+$r = energyManagerEngine::decide(base(array('grid' => 400, 'equips' => array($teslaEnCharge, rad(1, array('is_on' => true, 'priority' => 1))), 'mem' => array('imp_since' => 1000000 - 60))));
+check('Tesla en charge, soutirage durable : pas de délestage', find_action($r, 'equip', array('cmd' => 'off')) === null);
+
+// 36h. A9 : réduction critique trop rapprochée de la précédente écriture (5 s) : on attend que Hoymiles applique
+$r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -1500, 'hoy_limit' => 5000, 'mem' => array('last_hoy_write' => 1000000 - 5))));
+check('réduction critique 5 s après la précédente : pas de nouvelle écriture', find_action($r, 'hoymiles') === null);
+
+// 36i. A9 : 20 s après la précédente : la réduction critique passe
+$r = energyManagerEngine::decide(base(array('pv' => 5000, 'grid' => -1500, 'hoy_limit' => 5000, 'mem' => array('last_hoy_write' => 1000000 - 20))));
+check('réduction critique 20 s après la précédente : limite à 3500 W', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] == 3500);
+
+// 36j. A11 : sans mesure de batterie, on ne suppose pas qu'elle peut absorber
+$r = energyManagerEngine::decide(base(array('batt' => null, 'soc' => 60, 'pv' => 3000, 'grid' => -20, 'hoy_limit' => 3000, 'mem' => array('last_hoy_write' => 1000000 - 60))));
+check('batterie inconnue : aucune libération de la limite', find_action($r, 'hoymiles') === null);
+
+// 36k. A12 : un ballon déjà chaud et terminé ne compte pas dans l'énergie à chauffer (SOC projeté = 40 + (5 - 0,4 x 7) / 16 x 100 = 54)
+$r = energyManagerEngine::decide(base(array('soc' => 40, 'forecast_kwh' => 5, 'equips' => array(ecs(array('done_today' => true, 'water_temp' => 55))))));
+check('ballon chaud et terminé : SOC projeté 54 %', $r['info']['night_projected'] == 54);
+
+// 25. Plages d'heures creuses (texte du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');
 check('plages : 2 plages lues', count($slots) === 2);
 check('plages : 15h = HC', energyManagerEngine::slotAt($slots, 15 * 60) === 'HC');

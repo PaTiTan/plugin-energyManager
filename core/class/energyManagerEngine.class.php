@@ -58,6 +58,7 @@ class energyManagerEngine {
 		'inv_release_delay' => 30,    // s - la Tesla doit être à l'arrêt depuis ce délai avant de rendre l'onduleur à sa valeur maximale
 		'hoy_band'          => 0,     // W - tolérance au-delà du budget d'injection de la Tesla avant de réduire (aucune : jamais plus que l'agressivité)
 		'hoy_step_interval' => 30,    // s - délai mini entre deux paliers de libération de la limite Hoymiles
+		'hoy_critical_interval' => 15, // s - délai mini entre 2 réductions critiques (le temps que Hoymiles applique)
 		'tesla_hold_max'    => 1500,  // W - au-delà de cette injection, on n'attend plus la Tesla
 		'ecs_pv_ok'         => 500,   // W - (réservé)
 		'night_reserve'     => 50,    // % - SOC à garder pour la nuit (jauge du widget)
@@ -79,7 +80,14 @@ class energyManagerEngine {
 	 * @return array actions, alerts, info, mem
 	 */
 	public static function decide(array $s) {
-		$cfg = array_merge(self::DEFAULTS, isset($s['cfg']) ? $s['cfg'] : array());
+		// Surcharges de configuration : une valeur vide, nulle ou non numérique là où le défaut est numérique est ignorée (valeur Jeedom non saisie)
+		$cfgIn = (isset($s['cfg']) && is_array($s['cfg'])) ? $s['cfg'] : array();
+		foreach ($cfgIn as $k => $v) {
+			if ($v === null || $v === '' || (array_key_exists($k, self::DEFAULTS) && is_numeric(self::DEFAULTS[$k]) && !is_numeric($v))) {
+				unset($cfgIn[$k]);
+			}
+		}
+		$cfg = array_merge(self::DEFAULTS, $cfgIn);
 		$mem = array_merge(array(
 			'inj_since' => 0, 'imp_since' => 0, 'inj_any_since' => 0, 'last_start' => 0, 'last_hoy_write' => 0, 'hoy_hidden' => 0, 'tesla_prev_w' => 0, 'tesla_off_since' => 0,
 		), isset($s['mem']) ? $s['mem'] : array());
@@ -117,10 +125,15 @@ class energyManagerEngine {
 		$daytime = $pv >= $cfg['min_pv'];
 		$hoyLimit = isset($s['hoy_limit']) ? (float) $s['hoy_limit'] : (float) $cfg['hoy_max'];
 		$chargeLimit = isset($s['charge_limit']) ? (float) $s['charge_limit'] : (float) $cfg['charge_max'];
+		// Surplus « masqué » par la limite Hoymiles : invalidé quand la limite est revenue au maximum ou que la production passe sous la limite
+		// (nuage : il n'y a plus rien de masqué), et jamais supérieur à l'écart entre le maximum et la limite actuelle.
+		if ($hoyLimit >= $cfg['hoy_max'] || $pv < 0.9 * $hoyLimit) {
+			$mem['hoy_hidden'] = 0;
+		}
+		$mem['hoy_hidden'] = min((float) $mem['hoy_hidden'], max(0.0, (float) $cfg['hoy_max'] - $hoyLimit));
 
 		// durées d'état
 		$mem['inj_since'] = ($injection >= $cfg['inj_critical']) ? ($mem['inj_since'] ?: $now) : 0;
-		$mem['imp_since'] = ($import >= $cfg['imp_off']) ? ($mem['imp_since'] ?: $now) : 0;
 		$mem['inj_any_since'] = ($injection >= 100) ? ($mem['inj_any_since'] ?: $now) : 0;
 
 		$equips = isset($s['equips']) ? $s['equips'] : array();
@@ -143,6 +156,8 @@ class energyManagerEngine {
 		$prioEff = ($cfg['tesla_priority'] === 'battery' && $soc >= $cfg['battery_threshold']) ? 'tesla' : $cfg['tesla_priority'];
 		// Marge de teslasmartcharge (-300 à +300 W) : négative, elle autorise un soutirage EDF de |marge| W. On l'accepte (pas de réaction).
 		$tolerance = ($teslaSolar && $teslaEq !== null && isset($teslaEq['margin']) && is_numeric($teslaEq['margin'])) ? max(0, -(float) $teslaEq['margin']) : 0;
+		// Durée de soutirage (pour le délestage) : le soutirage doit dépasser le seuil de délestage ET la tolérance de la marge Tesla
+		$mem['imp_since'] = ($import >= max((float) $cfg['imp_off'], $tolerance)) ? ($mem['imp_since'] ?: $now) : 0;
 		// Priorité Tesla : tant qu'elle peut absorber et qu'elle a eu le temps de réagir, les autres consommateurs
 		// attendent (teslasmartcharge confirme chaque changement pendant 60 s). Une grosse injection n'attend pas.
 		$teslaGraceOver = $mem['inj_any_since'] > 0 && ($now - $mem['inj_any_since']) >= $cfg['tesla_grace'];
@@ -182,10 +197,14 @@ class energyManagerEngine {
 			foreach ($equips as $e) {
 				if ($e['type'] === 'ecs' && $e['mode'] === 'auto') {
 					$wt = (isset($e['water_temp']) && $e['water_temp'] !== null) ? (float) $e['water_temp'] : 20.0;
+					// ballon déjà chaud ou chauffé par EDF : il ne tire rien sur la batterie
+					if (!empty($e['force_edf']) || (!empty($e['done_today']) && $wt >= (isset($e['min_temp']) ? (float) $e['min_temp'] : 50))) {
+						continue;
+					}
 					$ecsKwh += max(0, $cfg['ecs_liters'] * 1.163 * ($cfg['ecs_nominal'] - $wt) / 1000);
 				}
 			}
-			$projected = $soc + (($forecast - $cfg['talon'] * $hoursLeft / 1000 - $ecsKwh) / $cfg['batt_kwh']) * 100;
+			$projected = $soc + (($forecast - $cfg['talon'] * $hoursLeft / 1000 - $ecsKwh) / max(1.0, (float) $cfg['batt_kwh'])) * 100;
 		}
 		$projected = min(100, $projected);
 		$ecsMayTake = ($projected >= $cfg['night_reserve']);
@@ -244,8 +263,9 @@ class energyManagerEngine {
 			}
 		}
 
-		// 4b. délestage : soutirage durable, ou plus de soleil, on coupe le moins prioritaire alimenté en solaire
-		$shedding = $mem['imp_since'] > 0 && ($now - $mem['imp_since']) >= $cfg['imp_hold'] && !$teslaSolar;
+		// 4b. délestage : soutirage durable (supérieur au seuil imp_off et à la tolérance de marge Tesla), ou plus de soleil, on coupe le moins
+		// prioritaire alimenté en solaire. Pas de délestage tant que la Tesla charge réellement (c'est elle qui régule le soutirage).
+		$shedding = $mem['imp_since'] > 0 && ($now - $mem['imp_since']) >= $cfg['imp_hold'] && !($teslaSolar && $teslaPower >= $cfg['tesla_min_w']);
 		if ($shedding || !$daytime) {
 			$rev = array_reverse($cands);
 			foreach ($rev as $e) {
@@ -310,7 +330,7 @@ class energyManagerEngine {
 
 		/* ---------- 5. Limite Hoymiles : jamais d'injection au-delà de ce que la Tesla peut absorber ---------- */
 		// Règle : injection autorisée = agressivité de la Tesla (500 / 1000 / 2000 W) tant qu'elle est active et peut absorber ; sinon AUCUNE.
-		// Sans Tesla active, on allume un consommateur, puis on libère exactement sa puissance, et ainsi de suite.
+		// Sans Tesla active, on allume un consommateur, puis on libère sa puissance (nette de l'injection déjà visible), et ainsi de suite.
 		$newHoy = $hoyLimit;
 		$reasonHoy = '';
 		$critical = $injection >= $cfg['inj_critical'];
@@ -318,24 +338,30 @@ class energyManagerEngine {
 		$teslaStuck = ($mem['inj_since'] > 0 && ($now - $mem['inj_since']) >= $cfg['tesla_patience']);
 		$teslaCan = $teslaSolar && $teslaRoom && !$teslaStuck;
 		$battLimit = min($newCharge, $cfg['charge_max']);
-		$battRoomW = ($battLimit >= 100 && $soc < 98) ? max(0, $battLimit - $battCharge) : 0;   // puissance que la batterie pourrait encore absorber
+		$battKnown = (isset($s['batt']) && is_numeric($s['batt']));   // sans mesure de batterie, on ne suppose pas de place
+		$battRoomW = ($battKnown && $battLimit >= 100 && $soc < 98) ? max(0, $battLimit - $battCharge) : 0;   // puissance que la batterie pourrait encore absorber
 		$forceWrite = false;
 		$stepRaise = false;
 
 		// Budget d'injection de la Tesla : pas encore en charge, 500 W juste de quoi la déclencher ; en charge, l'agressivité de l'équipement.
+		$aggrW = ($teslaEq !== null && isset($teslaEq['aggr_w']) && $teslaEq['aggr_w'] > 0) ? (float) $teslaEq['aggr_w'] : 1000.0;
 		$budget = null;
 		if ($teslaCan) {
-			$aggr = ($teslaEq !== null && isset($teslaEq['aggr_w']) && $teslaEq['aggr_w'] > 0) ? (float) $teslaEq['aggr_w'] : 1000.0;
-			$budget = ($teslaPower >= $cfg['tesla_min_w']) ? $aggr : min((float) $cfg['tesla_trigger_w'], $aggr);
+			$budget = ($teslaPower >= $cfg['tesla_min_w']) ? $aggrW : min((float) $cfg['tesla_trigger_w'], $aggrW);
 		}
-		// Réglage manuel de la charge Tesla à la hausse : la limite passe au maximum pour compenser
-		$teslaJump = ($teslaPower - (float) $mem['tesla_prev_w']) >= $cfg['tesla_jump'];
+		// Réglage manuel de la charge Tesla à la hausse : la limite passe au maximum pour compenser.
+		// Un palier légitime (libéré par nous, de la taille de l'agressivité) n'en est pas un : il faut dépasser agressivité + 300 W.
+		// Au tout premier cycle (pas de puissance précédente en mémoire), on ne peut pas parler de hausse.
+		$hadPrev = isset($s['mem']) && is_array($s['mem']) && array_key_exists('tesla_prev_w', $s['mem']);
+		$teslaJump = $hadPrev && ($teslaPower - (float) $mem['tesla_prev_w']) >= max((float) $cfg['tesla_jump'], $aggrW + 300);
 		$mem['tesla_prev_w'] = $teslaPower;
 
 		$allowed = ($budget !== null) ? (float) $budget : 0.0;
 		$band = ($budget !== null) ? (float) $cfg['hoy_band'] : (float) $cfg['hoy_min_delta'];
 		// injection qui restera quand le consommateur démarré dans ce cycle aura pris sa puissance
 		$injNet = max(0.0, $injection - $startedPower);
+		// Soutirage qui justifie de remettre la limite au maximum : au-delà de la tolérance Tesla et de l'écart minimal d'écriture (bruit de mesure)
+		$importThr = max($tolerance, (float) $cfg['hoy_min_delta']);
 
 		if ($injNet > $allowed + $band) {
 			// trop d'injection : on réduit juste ce qu'il faut pour revenir au budget (zéro sans Tesla active)
@@ -350,15 +376,17 @@ class energyManagerEngine {
 			if (!$daytime) {
 				$newHoy = $cfg['hoy_max'];
 				$reasonHoy = 'plus de soleil : limite remise au maximum';
-			} elseif ($import > $tolerance || $teslaJump) {
+			} elseif ($import > $importThr || $teslaJump) {
 				$newHoy = $cfg['hoy_max'];
 				$reasonHoy = ($teslaJump ? 'charge Tesla augmentée' : 'soutirage EDF de ' . round($import) . ' W') . ' : limite remise au maximum';
 				$forceWrite = true;
 			} elseif ($startedPower > 0) {
-				// un consommateur vient d'être allumé : on libère exactement sa puissance
-				$newHoy = min((float) $cfg['hoy_max'], $hoyLimit + $startedPower);
-				$reasonHoy = 'consommateur démarré : +' . round($startedPower) . ' W libérés';
-				$mem['hoy_hidden'] = max(0.0, (float) $mem['hoy_hidden'] - $startedPower);
+				// un consommateur vient d'être allumé : on libère sa puissance, nette de l'injection déjà visible au-delà du budget
+				// (celle-ci est déjà comptée dans le calcul de réduction : ne pas la libérer deux fois)
+				$release = max(0.0, $startedPower - max(0.0, $injection - $allowed));
+				$newHoy = min((float) $cfg['hoy_max'], $hoyLimit + $release);
+				$reasonHoy = 'consommateur démarré : +' . round($release) . ' W libérés';
+				$mem['hoy_hidden'] = max(0.0, (float) $mem['hoy_hidden'] - $release);
 				$forceWrite = true;
 			} elseif ($budget !== null) {
 				if ($pv >= 0.95 * $hoyLimit && $injection < max(100, 0.25 * $budget)) {
@@ -382,7 +410,9 @@ class energyManagerEngine {
 		$intervalOk = ($now - $mem['last_hoy_write']) >= $cfg['hoy_write_interval'];
 		$stepOk = ($now - $mem['last_hoy_write']) >= $cfg['hoy_step_interval'];
 		$isReduction = $newHoy < $hoyLimit;
-		if ($reasonHoy !== '' && $delta >= $cfg['hoy_min_delta'] && ($intervalOk || $forceWrite || ($critical && $isReduction) || ($stepRaise && $stepOk))) {
+		// réduction critique : on n'attend pas l'intervalle normal, mais on laisse à Hoymiles le temps d'appliquer la précédente
+		$critOk = ($now - $mem['last_hoy_write']) >= $cfg['hoy_critical_interval'];
+		if ($reasonHoy !== '' && $delta >= $cfg['hoy_min_delta'] && ($intervalOk || $forceWrite || ($critical && $isReduction && $critOk) || ($stepRaise && $stepOk))) {
 			$out['actions'][] = array('type' => 'hoymiles', 'value' => round($newHoy), 'reason' => $reasonHoy);
 			$mem['last_hoy_write'] = $now;
 		}
@@ -436,6 +466,10 @@ class energyManagerEngine {
 		}
 
 		/* ---------- 7. Informations de synthèse ---------- */
+		$decision = count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)';
+		if (count($waiting)) {
+			$decision .= ' — ' . implode(' ; ', $waiting);
+		}
 		$out['info'] = array(
 			'injection' => round($injection),
 			'import'    => round($import),
@@ -446,7 +480,7 @@ class energyManagerEngine {
 			'hoy_budget' => ($budget === null) ? 0 : round($budget),
 			'night_projected' => round($projected),
 			'wants_pending' => $wantsPending ? 1 : 0,
-			'decision'  => count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)' . (count($waiting) ? ' — ' . implode(' ; ', $waiting) : ''),
+			'decision'  => $decision,
 			'waiting'   => $waiting,
 		);
 		$out['mem'] = $mem;
