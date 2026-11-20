@@ -364,6 +364,7 @@
     $('#ems-forecast').prop('checked', false); $('#ems-auto').prop('checked', false); $('#ems-stale').prop('checked', false); $('#ems-heat').prop('checked', true)
     if (!bound) { bound = true; bind() }
     buildGauges()
+    log('info', 'Réserve de nuit réelle (reprise dans la jauge) : ' + init.reserve_text)
     log('info', 'Simulation démarrée à ' + clockText(S.t) + ' — ' + S.equips.length + ' équipement(s)' + (init.demo ? ' de démonstration' : ' (configuration réelle du plugin)') + '. Aucun ordre n\'est envoyé.')
     render()
     if (timer) { clearInterval(timer) }

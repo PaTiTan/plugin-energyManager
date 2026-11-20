@@ -170,6 +170,7 @@ class energyManager extends eqLogic {
 			}
 		}
 		$active = ((int) self::cfg('active', 1) === 1);
+		self::learnNight($state, $now, $minute); // apprentissage de la consommation de nuit (indépendant du pilotage)
 		$fc = self::readCmd(self::cfg('cmd_forecast_kwh'));
 		$state['forecast_kwh'] = ($fc !== null && is_numeric($fc['value'])) ? (float) $fc['value'] : null;
 		$inv = self::readCmd(self::cfg('cmd_inv_limit_fb'));
@@ -243,6 +244,118 @@ class energyManager extends eqLogic {
 		return $out;
 	}
 
+	/* ******************** Réserve de nuit apprise ******************** */
+
+	/** Historique des consommations de nuit (kWh), texte "5.2;4.8;..." (jamais du JSON : Jeedom le décoderait). */
+	public static function nightHistory() {
+		$raw = config::byKey('night_history', 'energyManager', '');
+		if (is_array($raw)) {
+			$raw = implode(';', $raw);
+		}
+		$out = array();
+		foreach (explode(';', (string) $raw) as $v) {
+			if (is_numeric(trim($v)) && (float) $v > 0) {
+				$out[] = (float) $v;
+			}
+		}
+		return $out;
+	}
+
+	public static function nightNeedKwh() {
+		return energyManagerEngine::nightNeed(self::nightHistory(), (float) self::cfg('night_kwh_default', 6));
+	}
+
+	public static function reserveAuto() {
+		return ((int) self::cfg('reserve_auto', 1) === 1);
+	}
+
+	/** Réserve de nuit appliquée (%) : calculée d'après les nuits mesurées, ou réglée à la main avec la jauge. */
+	public static function effectiveReserve() {
+		if (!self::reserveAuto()) {
+			return (float) self::cfg('night_reserve', 50);
+		}
+		return energyManagerEngine::reserveFromNeed(self::nightNeedKwh(), array(
+			'soc_min' => (float) self::cfg('soc_min', 10), 'batt_kwh' => (float) self::cfg('batt_kwh', 16),
+			'night_margin' => (float) self::cfg('night_margin', 15),
+		));
+	}
+
+	/** Texte affiché dans le widget : d'où vient la réserve. */
+	public static function reserveText() {
+		$r = round(self::effectiveReserve());
+		if (!self::reserveAuto()) {
+			return 'manuelle : ' . $r . ' %';
+		}
+		$n = count(self::nightHistory());
+		$need = number_format(self::nightNeedKwh(), 1, ',', '');
+		$t = 'auto : ' . $r . ' % (' . ($n >= 3
+			? 'consommation de nuit apprise ' . $need . ' kWh sur ' . $n . ' nuits'
+			: 'apprentissage ' . $n . '/3 nuits, valeur par défaut ' . $need . ' kWh') . ')';
+		if ((int) cache::byKey('energyManager::night_on')->getValue(0) === 1) {
+			$t .= ' · nuit en cours : ' . number_format((float) cache::byKey('energyManager::night_wh')->getValue(0) / 1000, 1, ',', '') . ' kWh';
+		}
+		return $t;
+	}
+
+	/**
+	 * Mesure la consommation de la maison pendant la nuit (de la tombée du jour au lever du soleil) et l'ajoute à l'historique.
+	 * Consommation = puissance « maison » moins les équipements pilotés (sinon la décharge de la batterie), cycle après cycle.
+	 */
+	private static function learnNight(array $_state, $_now, $_minute) {
+		$pv = $_state['pv'];
+		if ($pv === null) {
+			return;
+		}
+		$managed = 0.0;
+		foreach ($_state['all_equips'] as $e) {
+			$managed += (float) $e['power_real'];
+		}
+		if ($_state['house'] !== null) {
+			$w = max(0, (float) $_state['house'] - $managed);
+		} elseif ($_state['batt'] !== null) {
+			$w = max(0, -(float) $_state['batt']);
+		} else {
+			return;
+		}
+		$last = (int) cache::byKey('energyManager::night_ts')->getValue(0);
+		cache::set('energyManager::night_ts', $_now);
+		$dt = ($last > 0) ? min(120, max(0, $_now - $last)) : 0;
+		$minPv = (float) self::cfg('min_pv', 300);
+		$on = ((int) cache::byKey('energyManager::night_on')->getValue(0) === 1);
+		if (!$on) {
+			if ($pv < $minPv && $_minute >= 17 * 60) {
+				cache::set('energyManager::night_on', 1);
+				cache::set('energyManager::night_wh', 0);
+				cache::set('energyManager::night_sec', 0);
+				cache::set('energyManager::night_start', $_now);
+			}
+			return;
+		}
+		$start = (int) cache::byKey('energyManager::night_start')->getValue(0);
+		if (($_now - $start) > 20 * 3600) { // nuit jamais terminée (plugin arrêté) : on l'abandonne
+			cache::set('energyManager::night_on', 0);
+			return;
+		}
+		$wh = (float) cache::byKey('energyManager::night_wh')->getValue(0) + $w * $dt / 3600;
+		$sec = (int) cache::byKey('energyManager::night_sec')->getValue(0) + $dt;
+		cache::set('energyManager::night_wh', $wh);
+		cache::set('energyManager::night_sec', $sec);
+		if ($pv >= $minPv && $_minute >= 4 * 60 && $_minute < 12 * 60) {
+			// lever du soleil : la nuit est terminée. On ne retient que les nuits complètes et bien mesurées.
+			cache::set('energyManager::night_on', 0);
+			$duration = $_now - $start;
+			if ($duration >= 4 * 3600 && $sec >= 0.8 * $duration && $wh > 300) {
+				$h = self::nightHistory();
+				$h[] = round($wh / 1000, 2);
+				$h = array_slice($h, -14);
+				config::save('night_history', implode(';', $h), 'energyManager');
+				log::add('energyManager', 'info', 'Nuit mesurée : ' . round($wh / 1000, 2) . ' kWh sur ' . round($duration / 3600, 1) . ' h. Réserve de nuit : ' . self::reserveText());
+			} else {
+				log::add('energyManager', 'info', 'Nuit ignorée (trop courte ou mal mesurée) : ' . round($wh / 1000, 2) . ' kWh, ' . round($duration / 3600, 1) . ' h, mesures sur ' . round($sec / 3600, 1) . ' h.');
+			}
+		}
+	}
+
 	/**
 	 * Retour à l'état sûr au passage de l'interrupteur au rouge (une seule fois) : les limites que le plugin a pu réduire
 	 * (micro-onduleurs Hoymiles, onduleur Victron, charge de la batterie) reviennent à leur valeur maximale.
@@ -280,7 +393,7 @@ class energyManager extends eqLogic {
 			'imp_off' => (float) self::cfg('imp_off', 150),
 			'min_pv' => (float) self::cfg('min_pv', 300),
 			'tesla_priority' => self::cfg('tesla_priority', 'tesla'),
-			'night_reserve' => (float) self::cfg('night_reserve', 50),
+			'night_reserve' => self::effectiveReserve(),
 			'ecs_deadline' => (float) self::cfg('ecs_deadline', 16) * 60,
 			'ecs_absorb_temp' => (float) self::cfg('ecs_absorb_temp', 50),
 			'evening' => (float) self::cfg('evening_hour', 19) * 60,
@@ -769,7 +882,9 @@ class energyManager extends eqLogic {
 			$main->checkAndUpdateCmd('injection', $_result['info']['injection']);
 		}
 		$main->checkAndUpdateCmd('active_info', (int) self::cfg('active', 1));
-		$main->checkAndUpdateCmd('reserve_info', (float) self::cfg('night_reserve', 50));
+		$main->checkAndUpdateCmd('reserve_info', self::effectiveReserve());
+		$main->checkAndUpdateCmd('reserve_text', self::reserveText());
+		$main->checkAndUpdateCmd('reserve_auto_info', self::reserveAuto() ? 1 : 0);
 		foreach ($_state['all_equips'] as $e) {
 			$eq = eqLogic::byId($e['id']);
 			if (!is_object($eq)) {
@@ -820,14 +935,14 @@ class energyManager extends eqLogic {
 				array('pv', 'Production PV', 'W'), array('grid', 'Réseau', 'W'), array('batt', 'Batterie', 'W'),
 				array('soc', 'SOC batterie', '%'), array('house', 'Maison', 'W'), array('injection', 'Injection', 'W'),
 				array('hoy_limit', 'Limite Hoymiles', 'W'), array('charge_limit', 'Limite charge batterie', 'W'), array('inv_limit', 'Limite onduleur', 'W'),
-				array('active_info', 'Pilotage actif', ''), array('reserve_info', 'Réserve de nuit', '%'),
+				array('active_info', 'Pilotage actif', ''), array('reserve_info', 'Réserve de nuit', '%'), array('reserve_auto_info', 'Réserve automatique', ''),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'info', 'numeric', $c[2]);
 			}
 			foreach (array(
 				array('decision', 'Décision'), array('slot', 'Créneau tarifaire'), array('season', 'Saison'),
 				array('tesla_priority_info', 'Priorité Tesla/Batterie'), array('batt_target_info', 'Cible batterie'),
-				array('sim_info', 'Simulation'),
+				array('sim_info', 'Simulation'), array('reserve_text', 'Réserve de nuit (origine)'),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'info', 'string');
 			}
@@ -835,7 +950,7 @@ class energyManager extends eqLogic {
 				array('prio_tesla', 'Priorité Tesla'), array('prio_battery', 'Priorité batterie'),
 				array('target_95', 'Cible batterie 95 %'), array('target_100', 'Cible batterie 100 %'),
 				array('sim_on', 'Simulation ON'), array('sim_off', 'Simulation OFF'),
-				array('active_on', 'Pilotage ON'), array('active_off', 'Pilotage OFF'),
+				array('active_on', 'Pilotage ON'), array('active_off', 'Pilotage OFF'), array('reserve_auto_on', 'Réserve automatique ON'), array('reserve_auto_off', 'Réserve automatique OFF'),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'action', 'other');
 			}
@@ -902,7 +1017,7 @@ class energyManager extends eqLogic {
 		$version = jeedom::versionAlias($_version);
 		foreach (array('pv', 'grid', 'batt', 'soc', 'house', 'injection', 'hoy_limit', 'charge_limit', 'inv_limit', 'decision', 'sim_info',
 			'tesla_priority_info', 'batt_target_info', 'slot', 'season', 'prio_tesla', 'prio_battery', 'target_95', 'target_100',
-			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set') as $l) {
+			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set', 'reserve_auto_info', 'reserve_text', 'reserve_auto_on', 'reserve_auto_off') as $l) {
 			$c = $this->getCmd(null, $l);
 			$replace['#' . $l . '_id#'] = is_object($c) ? $c->getId() : 0;
 			$replace['#' . $l . '_val#'] = is_object($c) ? addslashes((string) $c->execCmd()) : '';
@@ -963,7 +1078,20 @@ class energyManagerCmd extends cmd {
 					$v = isset($_options['slider']) ? (float) $_options['slider'] : (float) energyManager::cfg('night_reserve', 50);
 					$v = max(0, min(100, round($v)));
 					config::save('night_reserve', $v, 'energyManager');
+					config::save('reserve_auto', 0, 'energyManager'); // un réglage à la main passe en manuel
 					$eq->checkAndUpdateCmd('reserve_info', $v);
+					$eq->checkAndUpdateCmd('reserve_auto_info', 0);
+					break;
+				case 'reserve_auto_on':
+					config::save('reserve_auto', 1, 'energyManager');
+					$eq->checkAndUpdateCmd('reserve_auto_info', 1);
+					$eq->checkAndUpdateCmd('reserve_info', energyManager::effectiveReserve());
+					break;
+				case 'reserve_auto_off':
+					config::save('night_reserve', round(energyManager::effectiveReserve()), 'energyManager'); // on garde la valeur du moment
+					config::save('reserve_auto', 0, 'energyManager');
+					$eq->checkAndUpdateCmd('reserve_auto_info', 0);
+					$eq->checkAndUpdateCmd('reserve_info', energyManager::effectiveReserve());
 					break;
 				case 'active_on':
 					config::save('active', 1, 'energyManager');

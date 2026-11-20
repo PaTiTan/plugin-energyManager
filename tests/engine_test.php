@@ -397,6 +397,16 @@ $teslaNonActif = array_merge($teslaEnCharge, array('mode' => 'off', 'active' => 
 $r = energyManagerEngine::decide(base(array('inv_limit' => 4000, 'equips' => array($teslaNonActif))));
 check('Tesla qui charge même hors mode solaire : onduleur à 0 W', ($a = find_action($r, 'inv_limit')) !== null && $a['value'] == 0);
 
+// 34. Réserve de nuit apprise
+check('nuit : moins de 3 mesures, valeur par défaut', energyManagerEngine::nightNeed(array(5.0, 5.5), 6) == 6.0);
+check('nuit : 3 mesures identiques', energyManagerEngine::nightNeed(array(5, 5, 5), 6) == 5.0);
+check('nuit : percentile 75 des mesures', energyManagerEngine::nightNeed(array(4, 5, 6, 7, 8), 6) == 7.0);
+check('nuit : valeurs invalides ignorées', energyManagerEngine::nightNeed(array('x', 0, -3, 4, 4, 4), 6) == 4.0);
+$cfgNuit = array('soc_min' => 10, 'batt_kwh' => 16, 'night_margin' => 15);
+check('réserve : 6 kWh + 15 % de marge sur 16 kWh + SOC mini = 53 %', energyManagerEngine::reserveFromNeed(6, $cfgNuit) == 53.0);
+check('réserve : plafonnée à 95 %', energyManagerEngine::reserveFromNeed(40, $cfgNuit) == 95.0);
+check('réserve : au moins SOC mini + 10 %', energyManagerEngine::reserveFromNeed(0.1, $cfgNuit) == 20.0);
+
 // 25. Plages d'heures creuses (JSON du sélecteur)
 $slots = energyManagerEngine::parseSlots('00:50-06:50;14:20-16:20');
 check('plages : 2 plages lues', count($slots) === 2);

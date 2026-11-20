@@ -93,7 +93,9 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 		<?php em_val_row('inj_legal', '{{Injection maximale légale}}', '3000', '', 'W'); ?>
 
 		<legend><i class="fas fa-moon"></i> {{Batterie : réserve de nuit et ballon}}</legend>
-		<?php em_val_row('night_reserve', '{{Réserve de nuit (SOC à laisser au soir)}}', '50', '{{Aussi réglable avec la jauge du widget. Le ballon ne passe avant la batterie que si le SOC projeté au soir reste au-dessus.}}', '%'); ?>
+		<?php em_val_row('night_reserve', '{{Réserve de nuit manuelle (SOC à laisser au soir)}}', '50', '{{Utilisée quand le mode Auto du widget est désactivé (jauge du widget). Le ballon ne passe avant la batterie que si le SOC projeté au soir reste au-dessus.}}', '%'); ?>
+		<?php em_val_row('night_kwh_default', '{{Consommation de nuit par défaut}}', '6', '{{Utilisée en mode Auto tant que 3 nuits n\'ont pas été mesurées. La consommation de nuit est ensuite apprise (percentile 75 des 14 dernières nuits).}}', 'kWh'); ?>
+		<?php em_val_row('night_margin', '{{Marge sur la consommation de nuit}}', '15', '', '%'); ?>
 		<?php em_val_row('evening_hour', '{{Heure du « soir »}}', '19', '{{Heure à laquelle la production passe sous le talon de la maison.}}', 'h'); ?>
 		<?php em_val_row('talon', '{{Talon de la maison}}', '400', '{{Consommation de base, utilisée pour projeter le SOC du soir avec la prévision solaire.}}', 'W'); ?>
 		<?php em_val_row('batt_kwh', '{{Capacité de la batterie}}', '16', '', 'kWh'); ?>

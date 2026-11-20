@@ -49,7 +49,7 @@ class energyManagerEngine {
 		'tesla_margin'      => 300,   // W - marge laissée à teslasmartcharge en mode solaire
 		'tesla_priority'    => 'tesla', // 'tesla' ou 'battery'
 		'tesla_room_margin' => 500,   // W - la Tesla peut encore absorber si sa puissance est inférieure de plus que cette marge à son maximum
-		'tesla_grace'       => 120,   // s - délai laissé à la Tesla (confirmation 60 s + API) avant d'agir sans elle
+		'tesla_grace'       => 60,   // s - délai laissé à la Tesla (confirmation 60 s + API) avant d'agir sans elle
 		'tesla_min_w'       => 460,   // W - plus petite charge de teslasmartcharge (2 A x 230 V) ; la plage va jusqu'à 32 A (~7 kW)
 		'tesla_patience'    => 300,   // s - injection critique durable malgré une Tesla en solaire : on la considère bloquée (API, réveil...)
 		'tesla_trigger_w'   => 500,   // W - puissance libérée pour DÉCLENCHER la charge de la Tesla (quelle que soit l'agressivité)
@@ -573,5 +573,36 @@ class energyManagerEngine {
 			}
 		}
 		return $slots;
+	}
+
+	/**
+	 * Besoin de la nuit (kWh) d'après l'historique des dernières nuits : percentile 75 (on préfère voir un peu large),
+	 * ou la valeur par défaut tant qu'il y a moins de $minSamples nuits mesurées.
+	 */
+	public static function nightNeed(array $history, $default, $minSamples = 3) {
+		$h = array();
+		foreach ($history as $v) {
+			if (is_numeric($v) && (float) $v > 0) {
+				$h[] = (float) $v;
+			}
+		}
+		if (count($h) < $minSamples) {
+			return (float) $default;
+		}
+		sort($h);
+		$idx = (int) ceil(0.75 * count($h)) - 1;
+		return round($h[max(0, min(count($h) - 1, $idx))], 2);
+	}
+
+	/**
+	 * SOC (%) à avoir au soir pour tenir la nuit : SOC mini + besoin de la nuit (avec marge) / capacité.
+	 * @param array $cfg soc_min, batt_kwh, night_margin (%)
+	 */
+	public static function reserveFromNeed($needKwh, array $cfg) {
+		$socMin = isset($cfg['soc_min']) ? (float) $cfg['soc_min'] : 10;
+		$cap = (isset($cfg['batt_kwh']) && $cfg['batt_kwh'] > 0) ? (float) $cfg['batt_kwh'] : 16;
+		$margin = isset($cfg['night_margin']) ? (float) $cfg['night_margin'] : 15;
+		$r = $socMin + ((float) $needKwh * (1 + $margin / 100) / $cap) * 100;
+		return round(max($socMin + 10, min(95, $r)));
 	}
 }

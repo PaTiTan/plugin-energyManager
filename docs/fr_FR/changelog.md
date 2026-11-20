@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- **Réserve de nuit apprise** : le plugin mesure la consommation de la maison de la tombée du jour au lever du soleil, garde les 14 dernières nuits et en déduit le SOC à laisser au soir (SOC mini + besoin de la nuit avec 15 % de marge, sur la capacité de la batterie). Mode **Auto** par défaut ; tant que 3 nuits n'ont pas été mesurées, la valeur par défaut est de 6 kWh.
+- **Visible dans le widget** : le texte sous les boutons indique l'origine de la réserve (auto ou manuelle, consommation de nuit apprise, nombre de nuits, nuit en cours). Le bouton **Auto** bascule en manuel ; la jauge n'est utilisable qu'en manuel.
+- teslasmartcharge 1.2.0-beta : hausses d'ampérage confirmées en 10 s ; le délai laissé à la Tesla par energyManager passe de 120 s à 60 s.
+
 ## 0.6.2
 
 - **Retour à l'état sûr** : au passage de l'interrupteur de pilotage au rouge, les limites que le plugin avait réduites (micro-onduleurs Hoymiles, onduleur Victron, charge de la batterie) reviennent une fois à leur valeur maximale. Rien n'est envoyé en mode simulation.

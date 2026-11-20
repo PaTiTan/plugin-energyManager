@@ -70,7 +70,7 @@ try {
 		}
 		ajax::success(array(
 			'equips' => $equips, 'demo' => $demo, 'cfg' => array_merge(energyManagerEngine::DEFAULTS, energyManager::engineConfig()),
-			'hc_slots' => (string) energyManager::cfg('hc_slots', ''),
+			'hc_slots' => (string) energyManager::cfg('hc_slots', ''), 'reserve_text' => energyManager::reserveText(),
 			'tesla_priority' => energyManager::cfg('tesla_priority', 'tesla'), 'batt_target' => (int) energyManager::cfg('batt_target', 100),
 		));
 	}
