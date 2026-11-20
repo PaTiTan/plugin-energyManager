@@ -26,7 +26,7 @@ Chaque consommateur géré est un équipement du plugin.
 | Type | Rôle |
 |---|---|
 | Consommateur simple | Radiateur piloté par un Shelly (ON/OFF), pièce avec sonde, consigne, priorité 1 à 3, capteur d'ouverture |
-| Ballon d'eau chaude | Minimum 52 °C, thermostat interne, chauffe solaire ou en heure creuse d'après-midi |
+| Ballon d'eau chaude | Action prioritaire de la journée : passe avant la batterie et la Tesla dès que le surplus mobilisable (injection + charge batterie + Tesla) atteint 70 % de sa puissance. En heure creuse d'après-midi, si le soleil ne suffit pas, EDF le chauffe jusqu'à ce que son thermostat coupe. Minimum 52 °C. |
 | Tesla | Commande teslasmartcharge : mode (Solaire, Stand-By, Non actif) et priorité (voiture ou maison) |
 | Gestionnaire | Un seul : porte le widget powerFlow et les sélecteurs |
 

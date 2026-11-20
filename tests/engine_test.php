@@ -143,9 +143,28 @@ check('ballon : chauffe en HC d\'après-midi sans soleil', find_action($r, 'equi
 $r = energyManagerEngine::decide(base(array('pv' => 100, 'hc_afternoon' => true, 'equips' => array(ecs(array('done_today' => true))))));
 check('ballon terminé : pas de chauffe', find_action($r, 'equip', array('cmd' => 'on')) === null);
 
-// 22. Ballon : en HC d'après-midi mais le soleil est là, pas d'EDF
-$r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => 0, 'hc_afternoon' => true, 'equips' => array(ecs()))));
-check('ballon : le soleil suffit, pas de chauffe EDF', find_action($r, 'equip', array('cmd' => 'on')) === null);
+// 22. Ballon : en HC d'après-midi mais le soleil est là (surplus mobilisable : la batterie en absorbe 3000 W), pas d'EDF
+$r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => 0, 'batt' => 3000, 'hc_afternoon' => true, 'equips' => array(ecs()))));
+$a = find_action($r, 'equip', array('id' => 50, 'cmd' => 'on'));
+check('ballon : le soleil suffit, chauffe solaire et pas EDF', $a !== null && strpos($a['reason'], 'heure creuse') === false);
+
+// 22b. Ballon prioritaire sur la batterie, même à SOC 60 % et sans injection
+$r = energyManagerEngine::decide(base(array('soc' => 60, 'pv' => 4000, 'grid' => 0, 'batt' => 3000, 'equips' => array(ecs()))));
+check('ballon prioritaire sur la batterie (SOC 60 %, aucune injection)', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+// 22c. Ballon lancé en HC : on le laisse chauffer jusqu'au thermostat, même au-dessus de 52 °C
+$r = energyManagerEngine::decide(base(array('pv' => 100, 'batt' => 0, 'hc_afternoon' => true,
+	'equips' => array(ecs(array('is_on' => true, 'power_real' => 2300, 'water_temp' => 55))))));
+check('ballon en HC : pas d\'arrêt avant le thermostat', find_action($r, 'equip', array('id' => 50, 'cmd' => 'off')) === null);
+
+// 22d. Ballon prioritaire sur la Tesla (priorité Tesla) : il démarre, teslasmartcharge s'ajustera
+$teslaCharge = array('id' => 91, 'type' => 'tesla', 'name' => 'Tesla', 'mode' => 'auto', 'active' => true, 'power_real' => 3000, 'power_theo' => 7000, 'priority' => 1);
+$r = energyManagerEngine::decide(base(array('pv' => 4000, 'grid' => 0, 'batt' => 0, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaCharge, ecs()))));
+check('ballon prioritaire sur la Tesla', find_action($r, 'equip', array('id' => 50, 'cmd' => 'on')) !== null);
+
+// 22e. Le message de décision explique pourquoi un consommateur attend
+$r = energyManagerEngine::decide(base(array('grid' => -300, 'batt' => 0, 'equips' => array(rad(1)))));
+check('décision : explique l\'attente', strpos($r['info']['decision'], 'attend') !== false);
 
 // 23. Ballon : priorité sur les radiateurs
 $r = energyManagerEngine::decide(base(array('grid' => -3000, 'equips' => array(rad(1, array('priority' => 1)), ecs()))));

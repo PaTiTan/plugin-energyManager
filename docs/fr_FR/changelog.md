@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Ballon : action prioritaire. Il démarre dès que le surplus mobilisable (injection + puissance de charge de la batterie + puissance de la Tesla) atteint 70 % de sa puissance, quel que soit le SOC, sans attendre la batterie ni la Tesla.
+- Ballon en heure creuse d'après-midi : si le soleil ne suffit pas, chauffe EDF jusqu'à ce que le thermostat coupe (il n'est plus arrêté à 52 °C).
+- Le message de décision explique pourquoi un consommateur attend (surplus disponible et besoin).
+
 ## 0.3.0
 
 - Page de simulation complète (bouton « Simulateur » de la page des équipements) : widget powerFlow animé, jauges actionnables (solaire disponible, talon maison, SOC, eau du ballon, température des pièces), heure et vitesse réglables, courbe solaire de la journée.

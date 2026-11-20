@@ -124,6 +124,19 @@ class energyManagerEngine {
 		$teslaHolds = $teslaSolar && $teslaRoom && $cfg['tesla_priority'] === 'tesla'
 			&& !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
 
+		// Surplus que le BALLON peut réclamer : il est prioritaire sur la batterie et sur la Tesla.
+		// = injection + puissance qui part dans la batterie + puissance déjà prise par la Tesla (teslasmartcharge s'ajustera).
+		$battCharge = (isset($s['batt']) && is_numeric($s['batt'])) ? max(0, (float) $s['batt']) : 0;
+		$teslaDraw = 0;
+		foreach ($equips as $e) {
+			if ($e['type'] === 'tesla' && $e['mode'] === 'auto' && !empty($e['active'])) {
+				$teslaDraw += max(0, (float) $e['power_real']);
+			}
+		}
+		$potential = $injection + $battCharge + $teslaDraw;
+		$s['_potential'] = $potential;
+		$waiting = array();
+
 		/* ---------- 3. Limite de charge batterie ---------- */
 		$newCharge = $cfg['charge_max'];
 		$reasonCharge = 'charge libre';
@@ -197,19 +210,24 @@ class energyManagerEngine {
 				continue;
 			}
 			// solaire : un seul démarrage par cycle, et seulement si le surplus le justifie
-			if ($started || $teslaHolds) {
+			// le ballon est prioritaire : il n'attend ni la Tesla ni la batterie
+			$isEcs = ($e['type'] === 'ecs');
+			if ($started || ($teslaHolds && !$isEcs)) {
 				$wantsPending = true;
+				$waiting[] = $e['name'] . ' attend ' . ($started ? 'le prochain cycle (un démarrage à la fois)' : 'que la Tesla monte en puissance (priorité Tesla)');
 				continue;
 			}
-			$need = $e['power_theo'] * $cfg['start_ratio'] + ($teslaSolar ? $cfg['tesla_margin'] : 0);
+			$avail = $isEcs ? $potential : $injection;
+			$need = $e['power_theo'] * $cfg['start_ratio'] + (($teslaSolar && !$isEcs) ? $cfg['tesla_margin'] : 0);
 			$settled = ($now - $mem['last_start']) >= $cfg['settle'];
-			if ($injection >= $need && $settled) {
+			if ($avail >= $need && $settled) {
 				$out['actions'][] = array('type' => 'equip', 'id' => $e['id'], 'cmd' => 'on',
-					'reason' => 'surplus ' . round($injection) . ' W ≥ ' . round($need) . ' W : ' . $e['_why']);
+					'reason' => 'surplus ' . round($avail) . ' W ≥ ' . round($need) . ' W' . ($isEcs ? ' (prioritaire sur la batterie)' : '') . ' : ' . $e['_why']);
 				$mem['last_start'] = $now;
 				$started = true;
 			} else {
 				$wantsPending = true;
+				$waiting[] = $e['name'] . ' attend : surplus ' . round($avail) . ' W < ' . round($need) . ' W' . ($settled ? '' : ' (stabilisation)');
 			}
 		}
 
@@ -260,7 +278,8 @@ class energyManagerEngine {
 			'tesla_solar' => $teslaSolar ? 1 : 0,
 			'tesla_holds' => $teslaHolds ? 1 : 0,
 			'wants_pending' => $wantsPending ? 1 : 0,
-			'decision'  => count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)',
+			'decision'  => count($out['actions']) ? self::summarize($out['actions']) : 'Aucune action (injection ' . round($injection) . ' W, soutirage ' . round($import) . ' W, SOC ' . round($soc) . ' %)' . (count($waiting) ? ' — ' . implode(' ; ', $waiting) : ''),
+				'waiting'   => $waiting,
 		);
 		$out['mem'] = $mem;
 		return $out;
@@ -290,8 +309,13 @@ class energyManagerEngine {
 			$water = isset($e['water_temp']) ? $e['water_temp'] : null;
 			$minT = isset($e['min_temp']) ? $e['min_temp'] : 52;
 			$cold = ($water === null) || ($water < $minT);
-			$poorSun = $pv < $cfg['ecs_pv_ok'];
-			if (!empty($s['hc_afternoon']) && $cold && ($poorSun || !empty($e['forecast_poor']))) {
+			// surplus solaire réellement mobilisable (injection + charge batterie + Tesla), calculé par decide()
+			$pot = isset($s['_potential']) ? (float) $s['_potential'] : 0.0;
+			$solarEnough = $daytime && $pot >= $e['power_theo'] * $cfg['start_ratio'];
+			$running = !empty($e['is_on']);
+			// HC d'après-midi : si le soleil ne suffit pas (ou prévision médiocre), EDF chauffe le ballon.
+			// Une fois lancé, on laisse chauffer jusqu'à ce que son thermostat coupe (la consommation retombe à zéro => "terminé").
+			if (!empty($s['hc_afternoon']) && ($cold || $running) && (!$solarEnough || !empty($e['forecast_poor']))) {
 				return array('want' => true, 'source' => 'edf', 'why' => 'heure creuse de l\'après-midi, soleil insuffisant, eau à ' . ($water === null ? '?' : $water) . ' °C');
 			}
 			if ($daytime) {
