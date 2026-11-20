@@ -22,6 +22,12 @@
 		.emw-#uid# .ctl .btn { padding:2px 8px }
 		.emw-#uid# .ctl .btn.active { background:#4ec9b0; color:#0b1620; border-color:#4ec9b0 }
 		.emw-#uid# .dec { margin-top:6px; font-size:11px; color:#8fb0c4 }
+		.emw-#uid# .led { display:inline-block; width:16px; height:16px; border-radius:50%; cursor:pointer; border:2px solid #0b1620; vertical-align:middle }
+		.emw-#uid# .led.g { background:#3ecf63; box-shadow:0 0 6px #3ecf63 }
+		.emw-#uid# .led.r { background:#d9534f; box-shadow:0 0 6px #d9534f }
+		.emw-#uid# .tile.unpiloted { opacity:.55; border-style:dashed }
+		.emw-#uid# .tile .led { width:12px; height:12px; float:right }
+		.emw-#uid# .master { font-size:13px; margin-bottom:4px }
 		.emw-#uid# .sim { display:none; background:#d9534f; color:#fff; border-radius:4px; padding:1px 8px; font-size:11px; margin-left:6px }
 	</style>
 	<center class="widget-name">
@@ -29,6 +35,7 @@
 		<span class="sim" id="sim-#uid#">SIMULATION</span>
 	</center>
 	<div class="emw-#uid#">
+		<div class="master"><span class="led r" id="led-#uid#" title="Pilotage par energyManager : cliquer pour activer / désactiver"></span> <span id="ledtxt-#uid#"></span></div>
 		<svg viewBox="0 0 560 250" xmlns="http://www.w3.org/2000/svg">
 			<!-- fils -->
 			<path class="wire" d="M120 45 H280 V105"/>
@@ -66,7 +73,7 @@
 		(function () {
 			var uid = '#uid#'
 			var V = { pv: '#pv_val#', grid: '#grid_val#', batt: '#batt_val#', soc: '#soc_val#', house: '#house_val#', inj: '#injection_val#',
-				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#' }
+				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#' }
 			var consumers = #consumers#
 			var el = function (id) { return document.getElementById(id + '-' + uid) }
 			var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n }
@@ -92,9 +99,14 @@
 				mark('bpt', V.prio === 'tesla'); mark('bpb', V.prio === 'battery')
 				mark('b95', String(V.tgt) === '95'); mark('b100', String(V.tgt) === '100')
 				mark('bson', String(V.sim) === '1'); mark('bsoff', String(V.sim) !== '1')
+				var activeOn = (String(V.act) !== '0')
+				el('led').className = 'led ' + (activeOn ? 'g' : 'r')
+				el('ledtxt').textContent = activeOn ? 'Pilotage actif' : 'Pilotage désactivé : rien n\'est commandé'
 				var html = ''
-				consumers.forEach(function (c) {
-					html += '<div class="tile ' + (c.status === 'ON' ? 'on' : '') + '">' + c.name + '<b>' + Math.round(c.power) + ' W</b>' + c.status + '</div>'
+				consumers.forEach(function (c, i) {
+					html += '<div class="tile ' + (c.status === 'ON' ? 'on' : '') + (c.piloted ? '' : ' unpiloted') + '">'
+						+ '<span class="led ' + (c.piloted ? 'g' : 'r') + '" data-i="' + i + '" title="Piloté par energyManager : cliquer pour changer"></span>'
+						+ c.name + '<b>' + Math.round(c.power) + ' W</b>' + c.status + '</div>'
 				})
 				document.getElementById('cons-' + uid).innerHTML = html
 			}
@@ -103,14 +115,22 @@
 			}
 			bind('#pv_id#', 'pv'); bind('#grid_id#', 'grid'); bind('#batt_id#', 'batt'); bind('#soc_id#', 'soc')
 			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#charge_limit_id#', 'chg')
-			bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
+			bind('#active_info_id#', 'act'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
 			consumers.forEach(function (c, i) {
 				if (c.power_id) { jeedom.cmd.update[c.power_id] = function (o) { consumers[i].power = num(o.display_value); render() } }
+				if (c.piloted_id) { jeedom.cmd.update[c.piloted_id] = function (o) { consumers[i].piloted = (String(o.display_value) !== '0') ? 1 : 0; render() } }
 				if (c.status_id) { jeedom.cmd.update[c.status_id] = function (o) { consumers[i].status = o.display_value; render() } }
 			})
 			var act = function (id, cmdId) { el(id).onclick = function () { jeedom.cmd.execute({ id: cmdId }) } }
 			act('bpt', '#prio_tesla_id#'); act('bpb', '#prio_battery_id#'); act('b95', '#target_95_id#'); act('b100', '#target_100_id#')
 			act('bson', '#sim_on_id#'); act('bsoff', '#sim_off_id#')
+			el('led').onclick = function () { jeedom.cmd.execute({ id: (String(V.act) !== '0') ? '#active_off_id#' : '#active_on_id#' }) }
+			document.getElementById('cons-' + uid).onclick = function (ev) {
+				var t = ev.target
+				if (!t || !t.getAttribute || t.getAttribute('data-i') === null) { return }
+				var c = consumers[parseInt(t.getAttribute('data-i'), 10)]
+				jeedom.cmd.execute({ id: c.piloted ? c.pilot_off_id : c.pilot_on_id })
+			}
 			render()
 		})()
 	</script>

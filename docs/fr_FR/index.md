@@ -10,7 +10,7 @@ Energy Manager pilote l'autoconsommation de votre installation : onduleur-charge
 
 Menu **Plugins → Énergie → Energy Manager → Configuration**.
 
-- **Sécurité et fonctionnement** : mode simulation, cadence de décision, âge maximal d'une mesure.
+- **Sécurité et fonctionnement** : mode simulation, cadence de décision, âge maximal d'une mesure (le SOC batterie n'est pas contrôlé en âge par défaut).
 - **Alertes** : webhook Discord d'urgence (alertes répétées en boucle), commande de message avec « ask » du plugin Discord.
 - **Mesures** : puissance réseau (positive = soutirage EDF, négative = injection), production PV, batterie (puissance et SOC), maison, compteurs du jour.
 - **Victron** : pour chaque levier (charge batterie, onduleur, SOC mini) une commande d'**ordre** et une commande de **retour**. Un ordre non confirmé par son retour déclenche une alerte.
@@ -34,7 +34,7 @@ Chaque équipement a trois modes : **auto**, **forcé ON**, **inactif**.
 
 ## Widget
 
-Le widget du gestionnaire reprend le principe du powerFlow : solaire, réseau, MultiPlus, maison, batterie, consommateurs, avec flux animés. Sélecteurs : priorité Tesla ou batterie, cible de charge 95 % ou 100 %, simulation.
+Le widget du gestionnaire reprend le principe du powerFlow : solaire, réseau, MultiPlus, maison, batterie, consommateurs, avec flux animés. Sélecteurs : priorité Tesla ou batterie, cible de charge 95 % ou 100 %, simulation. Un **interrupteur rouge/vert** en haut active ou coupe tout le pilotage, et chaque consommateur a son propre voyant (vert = piloté par le plugin, rouge = ignoré).
 
 ## Simulateur
 

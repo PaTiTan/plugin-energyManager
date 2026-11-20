@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Interrupteur général rouge/vert dans le widget : vert = energyManager pilote, rouge = il mesure et affiche seulement (aucun ordre, aucune alerte).
+- Un voyant rouge/vert cliquable par consommateur : vert = piloté par le plugin, rouge = laissé de côté. Commandes `Piloté ON/OFF` disponibles sur chaque équipement.
+- Le SOC batterie n'est plus contrôlé en âge par défaut (paramètre « Âge maximal du SOC batterie », 0 = aucun contrôle). Seule son absence bloque le pilotage.
+
 ## 0.2.1
 
 - Correctif : les plages d'heures creuses n'étaient pas mémorisées (Jeedom décode automatiquement les valeurs ressemblant à du JSON). Nouveau format texte.

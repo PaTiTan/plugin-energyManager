@@ -73,6 +73,7 @@ function em_val_row($key, $label, $default, $help = '', $unit = '') {
 			</div>
 		</div>
 		<?php em_val_row('stale_age', '{{Âge maximal d\'une mesure}}', '300', '{{Au-delà, la donnée est périmée : aucun pilotage et alerte.}}', 's'); ?>
+		<?php em_val_row('stale_age_soc', '{{Âge maximal du SOC batterie}}', '0', '{{0 = pas de contrôle d\'âge (le SOC varie peu). Seule l\'absence de valeur bloque le pilotage.}}', 's'); ?>
 		<?php em_val_row('feedback_delay', '{{Délai de confirmation d\'un ordre}}', '90', '{{Un ordre Victron/Ahoy non confirmé par son retour d\'information après ce délai déclenche une alerte.}}', 's'); ?>
 
 		<legend><i class="fab fa-discord"></i> {{Alertes}}</legend>

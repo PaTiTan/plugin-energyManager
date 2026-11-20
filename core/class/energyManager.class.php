@@ -159,20 +159,39 @@ class energyManager extends eqLogic {
 			'now' => $now, 'minute' => $minute,
 			'grid' => self::measure('cmd_grid', $stale, $staleAge),
 			'pv' => self::measure('cmd_pv', $stale, $staleAge),
-			'soc' => self::measure('cmd_soc', $stale, $staleAge),
+			// le SOC bouge peu : pas de contrôle d'âge par défaut (stale_age_soc = 0), seule son absence bloque
+			'soc' => self::measure('cmd_soc', $stale, (int) self::cfg('stale_age_soc', 0)),
 			// batterie et maison sont informatives : leur absence ne bloque pas le pilotage
 			'batt' => self::measure('cmd_batt', $ignored, $staleAge),
 			'house' => self::measure('cmd_house', $ignored, $staleAge),
 			'stale' => $stale,
 			'hc' => ($slot === 'HC'), 'hc_afternoon' => $hcAfternoon,
 			'cfg' => self::engineConfig(),
-			'equips' => self::buildEquips($now, $minute, $hcAfternoonEnd),
+			'equips' => array(),
 			'mem' => self::cacheJson('energyManager::mem'),
 		);
+		// seuls les équipements "pilotés" (voyant vert) sont confiés au moteur ; les autres restent juste mesurés
+		$state['all_equips'] = self::buildEquips($now, $minute, $hcAfternoonEnd);
+		foreach ($state['all_equips'] as $e) {
+			if ($e['piloted']) {
+				$state['equips'][] = $e;
+			}
+		}
+		$active = ((int) self::cfg('active', 1) === 1);
 		$hoy = self::readCmd(self::cfg('cmd_hoy_limit_fb'));
 		$chg = self::readCmd(self::cfg('cmd_charge_limit_fb'));
 		$state['hoy_limit'] = ($hoy !== null && is_numeric($hoy['value'])) ? (float) $hoy['value'] : (float) $state['cfg']['hoy_max'];
 		$state['charge_limit'] = ($chg !== null && is_numeric($chg['value'])) ? (float) $chg['value'] : (float) $state['cfg']['charge_max'];
+
+		if (!$active) {
+			// interrupteur général rouge : on mesure et on affiche, mais aucune décision, aucun ordre, aucune alerte
+			$result = array('actions' => array(), 'alerts' => array(), 'mem' => array(),
+				'info' => array('decision' => 'Pilotage désactivé (interrupteur rouge)'));
+			cache::set('energyManager::mem', '{}');
+			self::mirror($state, $result, $slot, $simulation);
+			self::handleAlerts(array(), $now);
+			return $result;
+		}
 
 		$result = energyManagerEngine::decide($state);
 		cache::set('energyManager::mem', json_encode($result['mem']));
@@ -234,6 +253,7 @@ class energyManager extends eqLogic {
 			$e = array(
 				'id' => $eq->getId(), 'type' => $type, 'name' => $eq->getName(),
 				'mode' => $eq->getConfiguration('mode', 'auto'),
+				'piloted' => ((int) $eq->getConfiguration('piloted', 1) === 1),
 				'is_on' => $isOn, 'power_real' => $power,
 				'power_theo' => (float) $eq->getConfiguration('power_theo', 1000),
 				'priority' => (int) $eq->getConfiguration('priority', 2),
@@ -447,9 +467,12 @@ class energyManager extends eqLogic {
 	 * Ne renvoie l'ordre que si la valeur a changé (ou si la Tesla vient d'être ajoutée).
 	 */
 	public static function syncTeslaPriority() {
+		if ((int) self::cfg('active', 1) !== 1) {
+			return; // pilotage général désactivé : on n'envoie rien à teslasmartcharge
+		}
 		$wanted = (self::cfg('tesla_priority', 'tesla') === 'tesla') ? 'voiture' : 'maison';
 		foreach (eqLogic::byType('energyManager', true) as $eq) {
-			if ($eq->getConfiguration('eqType') !== 'tesla') {
+			if ($eq->getConfiguration('eqType') !== 'tesla' || (int) $eq->getConfiguration('piloted', 1) !== 1) {
 				continue;
 			}
 			$key = 'energyManager::tesla_prio::' . $eq->getId();
@@ -558,11 +581,13 @@ class energyManager extends eqLogic {
 		if (isset($_result['info']['injection'])) {
 			$main->checkAndUpdateCmd('injection', $_result['info']['injection']);
 		}
-		foreach ($_state['equips'] as $e) {
+		$main->checkAndUpdateCmd('active_info', (int) self::cfg('active', 1));
+		foreach ($_state['all_equips'] as $e) {
 			$eq = eqLogic::byId($e['id']);
 			if (!is_object($eq)) {
 				continue;
 			}
+			$eq->checkAndUpdateCmd('piloted_info', $e['piloted'] ? 1 : 0);
 			$eq->checkAndUpdateCmd('power', $e['power_real']);
 			$eq->checkAndUpdateCmd('status', $e['is_on'] ? 'ON' : 'OFF');
 			$eq->checkAndUpdateCmd('mode_info', $e['type'] === 'tesla' ? (string) $e['tesla_mode'] : $eq->getConfiguration('mode', 'auto'));
@@ -607,6 +632,7 @@ class energyManager extends eqLogic {
 				array('pv', 'Production PV', 'W'), array('grid', 'Réseau', 'W'), array('batt', 'Batterie', 'W'),
 				array('soc', 'SOC batterie', '%'), array('house', 'Maison', 'W'), array('injection', 'Injection', 'W'),
 				array('hoy_limit', 'Limite Hoymiles', 'W'), array('charge_limit', 'Limite charge batterie', 'W'),
+				array('active_info', 'Pilotage actif', ''),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'info', 'numeric', $c[2]);
 			}
@@ -621,6 +647,7 @@ class energyManager extends eqLogic {
 				array('prio_tesla', 'Priorité Tesla'), array('prio_battery', 'Priorité batterie'),
 				array('target_95', 'Cible batterie 95 %'), array('target_100', 'Cible batterie 100 %'),
 				array('sim_on', 'Simulation ON'), array('sim_off', 'Simulation OFF'),
+				array('active_on', 'Pilotage ON'), array('active_off', 'Pilotage OFF'),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'action', 'other');
 			}
@@ -631,6 +658,9 @@ class energyManager extends eqLogic {
 		$this->createCmd('status', 'Statut', 'info', 'string');
 		$this->createCmd('mode_info', 'Mode', 'info', 'string');
 		$this->createCmd('last_reason', 'Dernière décision', 'info', 'string');
+		$this->createCmd('piloted_info', 'Piloté', 'info', 'numeric');
+		$this->createCmd('pilot_on', 'Piloté ON', 'action', 'other');
+		$this->createCmd('pilot_off', 'Piloté OFF', 'action', 'other');
 		if ($type === 'tesla') {
 			$this->createCmd('mode_solar', 'Mode solaire', 'action', 'other');
 			$this->createCmd('mode_standby', 'Stand-by', 'action', 'other');
@@ -675,7 +705,7 @@ class energyManager extends eqLogic {
 		$version = jeedom::versionAlias($_version);
 		foreach (array('pv', 'grid', 'batt', 'soc', 'house', 'injection', 'hoy_limit', 'charge_limit', 'decision', 'sim_info',
 			'tesla_priority_info', 'batt_target_info', 'slot', 'season', 'prio_tesla', 'prio_battery', 'target_95', 'target_100',
-			'sim_on', 'sim_off') as $l) {
+			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off') as $l) {
 			$c = $this->getCmd(null, $l);
 			$replace['#' . $l . '_id#'] = is_object($c) ? $c->getId() : 0;
 			$replace['#' . $l . '_val#'] = is_object($c) ? addslashes((string) $c->execCmd()) : '';
@@ -687,7 +717,14 @@ class energyManager extends eqLogic {
 			}
 			$p = $eq->getCmd(null, 'power');
 			$s = $eq->getCmd(null, 'status');
+			$pi = $eq->getCmd(null, 'piloted_info');
+			$pon = $eq->getCmd(null, 'pilot_on');
+			$poff = $eq->getCmd(null, 'pilot_off');
 			$consumers[] = array(
+				'piloted' => ((int) $eq->getConfiguration('piloted', 1) === 1) ? 1 : 0,
+				'piloted_id' => is_object($pi) ? $pi->getId() : 0,
+				'pilot_on_id' => is_object($pon) ? $pon->getId() : 0,
+				'pilot_off_id' => is_object($poff) ? $poff->getId() : 0,
 				'eq' => $eq->getId(), 'name' => $eq->getName(), 'type' => $eq->getConfiguration('eqType'),
 				'power_id' => is_object($p) ? $p->getId() : 0, 'power' => is_object($p) ? (float) $p->execCmd() : 0,
 				'status_id' => is_object($s) ? $s->getId() : 0, 'status' => is_object($s) ? (string) $s->execCmd() : '',
@@ -725,6 +762,14 @@ class energyManagerCmd extends cmd {
 				case 'target_100':   config::save('batt_target', 100, 'energyManager'); break;
 				case 'sim_on':       config::save('simulation', 1, 'energyManager'); break;
 				case 'sim_off':      config::save('simulation', 0, 'energyManager'); break;
+				case 'active_on':
+					config::save('active', 1, 'energyManager');
+					$eq->checkAndUpdateCmd('active_info', 1);
+					break;
+				case 'active_off':
+					config::save('active', 0, 'energyManager');
+					$eq->checkAndUpdateCmd('active_info', 0);
+					break;
 				case 'ecs_answer':
 					$answer = isset($_options['answer']) ? $_options['answer'] : (isset($_options['message']) ? $_options['message'] : '');
 					if (stripos((string) $answer, 'oui') === 0) {
@@ -740,6 +785,12 @@ class energyManagerCmd extends cmd {
 			return;
 		}
 
+		if ($id === 'pilot_on' || $id === 'pilot_off') {
+			$eq->setConfiguration('piloted', ($id === 'pilot_on') ? 1 : 0);
+			$eq->save(true);
+			$eq->checkAndUpdateCmd('piloted_info', ($id === 'pilot_on') ? 1 : 0);
+			return;
+		}
 		if ($id === 'force_edf') {
 			cache::set('energyManager::ecs_force::' . $eq->getId(), date('Ymd'));
 			return;

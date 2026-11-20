@@ -38,7 +38,7 @@ try {
 			'hc_afternoon' => !empty($in['hc_afternoon']),
 			'cfg' => energyManager::engineConfig(),
 			'hoy_limit' => (float) $in['hoy_limit'], 'charge_limit' => (float) $in['charge_limit'],
-			'equips' => energyManager::buildEquips(time(), 0, null), 'mem' => array(),
+			'equips' => array_values(array_filter(energyManager::buildEquips(time(), 0, null), function ($e) { return $e['piloted']; })), 'mem' => array(),
 		);
 		// valeurs saisies pour les pièces et le ballon
 		foreach ($state['equips'] as &$e) {
