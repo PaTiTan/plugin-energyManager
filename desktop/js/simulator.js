@@ -14,7 +14,6 @@
   var TESLA_MAX = 7360    // W : 32 A x 230 V
   var TESLA_UP = 10       // s : confirmation d'une hausse (teslasmartcharge 1.2)
   var TESLA_DOWN = 60     // s : confirmation d'une baisse
-  var TESLA_SEUIL = 80    // % : seuil batterie de teslasmartcharge en priorité « maison » (réglage du plugin Tesla)
   var CYCLE = 10          // s : cadence de décision
 
   var S = null            // état simulé
@@ -120,6 +119,8 @@
     makeGauge('right', { label: '🚗 Marge Tesla (négative = soutirage EDF toléré)', min: -300, max: 300, step: 50, unit: ' W', color: '#d98a4a',
       get: function () { var t = byType('tesla'); return t.length ? (t[0].margin || 0) : null },
       set: function (v) { byType('tesla').forEach(function (e) { e.margin = v }) } })
+    makeGauge('right', { label: '⚖ Seuil de la priorité Batterie (SOC)', min: 0, max: 100, step: 5, unit: ' %', color: '#5bc0de',
+      get: function () { return S.threshold }, set: function (v) { S.threshold = v } })
     makeGauge('right', { label: '🌙 Réserve de nuit : SOC à laisser au soir', min: 0, max: 100, step: 5, unit: ' %', color: '#8e7cc3',
       get: function () { return S.reserve }, set: function (v) { S.reserve = v } })
     makeGauge('right', { label: '🔮 Prévision solaire restante (si cochée)', min: 0, max: 40, step: 1, unit: ' kWh', color: '#f5d76e',
@@ -171,14 +172,14 @@
       if (!e.active) { e.power_real = 0; e._t = 0; e._dir = 0 } else {
         // priorité « maison » sous le seuil de SOC : la batterie passe d'abord (sa charge n'est pas offerte à la voiture), mais la voiture
         // n'attend jamais : elle prend tout ce que la batterie n'absorbe pas (l'injection) dès qu'il y a 2 A
-        var battFirst = (S.prio === 'battery' && S.soc < TESLA_SEUIL)
+        var battFirst = (S.prio === 'battery' && S.soc < S.threshold)
         var apport = battFirst ? 0 : S.batt
         var allow = apport - S.grid + e.power_real - (e.margin || 0)     // marge de teslasmartcharge : négative = soutirage EDF toléré
         var amps = Math.min(32, Math.floor(allow / 230))
         if (amps < 2) { amps = 0 }
         var cap = e.power_theo || TESLA_MAX
         var target = Math.min(amps * 230, cap)
-        var why = (battFirst ? 'priorité maison (SOC ' + Math.round(S.soc) + ' % < ' + TESLA_SEUIL + ' %) : la batterie d\'abord, la voiture prend l\'injection · ' : '')
+        var why = (battFirst ? 'priorité maison (SOC ' + Math.round(S.soc) + ' % < ' + Math.round(S.threshold) + ' %) : la batterie d\'abord, la voiture prend l\'injection · ' : '')
           + 'surplus ' + Math.round(allow) + ' W (batterie ' + Math.round(apport) + ' − réseau ' + Math.round(S.grid) + ' + voiture ' + Math.round(e.power_real) + ')'
         if (amps === 0) { why += ' < ' + TESLA_MIN + ' W (2 A mini) : pas de charge' }
         else { why += ' → ' + amps + ' A' + (amps * 230 > cap ? ' (plafonné à la puissance maximale ' + Math.round(cap) + ' W)' : '') }
@@ -242,7 +243,7 @@
     inflight = true
     var state = {
       now: Math.floor(S.t), minute: minuteOf(S.t), grid: S.grid, pv: S.pv, soc: S.soc, batt: S.batt, house: S.house,
-      stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio, night_reserve: S.reserve }, hoy_limit: S.hoy, charge_limit: S.chg, inv_limit: S.inv,
+      stale: S.stale, cfg: { batt_target: S.target, tesla_priority: S.prio, night_reserve: S.reserve, battery_threshold: S.threshold }, hoy_limit: S.hoy, charge_limit: S.chg, inv_limit: S.inv,
       forecast_kwh: S.useForecast ? S.forecast : null,
       equips: S.equips, mem: S.mem
     }
@@ -367,7 +368,7 @@
       pvAvail: 4000, talon: 500, soc: 60, auto: false, stale: false, active: true, running: true, speed: num($('#ems-speed').val()) || 10,
       cfg: init.cfg, hoy: num(init.cfg.hoy_max), chg: num(init.cfg.charge_max), inv: num(init.cfg.inv_max),
       prio: init.tesla_priority === 'battery' ? 'battery' : 'tesla', target: init.batt_target === 95 ? 95 : 100,
-      reserve: num(init.cfg.night_reserve), forecast: 10, useForecast: false, night: null,
+      threshold: num(init.cfg.battery_threshold), reserve: num(init.cfg.night_reserve), forecast: 10, useForecast: false, night: null,
       equips: init.equips, mem: {}, since: CYCLE, slot: 'HP', decision: '', decisionAlert: false, day: null,
       pv: 0, pvA: 0, grid: 0, batt: 0, house: 0, dragTime: false
     }

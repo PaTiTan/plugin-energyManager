@@ -233,6 +233,7 @@ class energyManager extends eqLogic {
 		}
 		if (!$simulation) {
 			self::syncTeslaPriority();
+			self::syncTeslaThreshold();
 		}
 		self::checkFeedback($now);
 		if (!$simulation) {
@@ -476,6 +477,7 @@ class energyManager extends eqLogic {
 			'min_pv' => (float) self::cfg('min_pv', 300),
 			'tesla_priority' => self::cfg('tesla_priority', 'tesla'),
 			'night_reserve' => self::effectiveReserve(),
+			'battery_threshold' => (float) self::cfg('battery_threshold', 80),
 			'ecs_deadline' => (float) self::cfg('ecs_deadline', 16) * 60,
 			'ecs_absorb_temp' => (float) self::cfg('ecs_absorb_temp', 50),
 			'evening' => (float) self::cfg('evening_hour', 19) * 60,
@@ -841,6 +843,33 @@ class energyManager extends eqLogic {
 		}
 	}
 
+	/**
+	 * Envoie à teslasmartcharge le seuil de batterie choisi dans le widget (commande set_seuil_batterie_maison),
+	 * seulement s'il a changé : energyManager est le seul décideur de la priorité et de son seuil.
+	 */
+	public static function syncTeslaThreshold() {
+		if ((int) self::cfg('pilot_active', 1) !== 1) {
+			return;
+		}
+		$wanted = (int) round((float) self::cfg('battery_threshold', 80));
+		foreach (eqLogic::byType('energyManager', true) as $eq) {
+			if ($eq->getConfiguration('eqType') !== 'tesla' || (int) $eq->getConfiguration('piloted', 1) !== 1) {
+				continue;
+			}
+			$key = 'energyManager::tesla_thr::' . $eq->getId();
+			if ((string) cache::byKey($key)->getValue('') === (string) $wanted) {
+				continue;
+			}
+			$cmd = self::teslaInfoCmd($eq, 'cmd_set_threshold', 'set_seuil_batterie_maison');
+			if ($cmd === null) {
+				continue;
+			}
+			$cmd->execCmd(array('slider' => $wanted));
+			cache::set($key, (string) $wanted);
+			log::add('energyManager', 'info', 'Seuil de batterie envoyé à teslasmartcharge : ' . $wanted . ' %');
+		}
+	}
+
 	/** Les ordres Victron / Ahoy doivent être confirmés par leur retour d'information. */
 	private static function checkFeedback($_now) {
 		$map = array('hoy' => 'cmd_hoy_limit_fb', 'charge' => 'cmd_charge_limit_fb', 'inv' => 'cmd_inv_limit_fb');
@@ -964,6 +993,7 @@ class energyManager extends eqLogic {
 			$main->checkAndUpdateCmd('injection', $_result['info']['injection']);
 		}
 		$main->checkAndUpdateCmd('active_info', (int) self::cfg('pilot_active', 1));
+		$main->checkAndUpdateCmd('threshold_info', (float) self::cfg('battery_threshold', 80));
 		$main->checkAndUpdateCmd('reserve_info', self::effectiveReserve());
 		$main->checkAndUpdateCmd('reserve_text', self::reserveText());
 		$main->checkAndUpdateCmd('reserve_auto_info', self::reserveAuto() ? 1 : 0);
@@ -1017,7 +1047,7 @@ class energyManager extends eqLogic {
 				array('pv', 'Production PV', 'W'), array('grid', 'Réseau', 'W'), array('batt', 'Batterie', 'W'),
 				array('soc', 'SOC batterie', '%'), array('house', 'Maison', 'W'), array('injection', 'Injection', 'W'),
 				array('hoy_limit', 'Limite Hoymiles', 'W'), array('charge_limit', 'Limite charge batterie', 'W'), array('inv_limit', 'Limite onduleur', 'W'),
-				array('active_info', 'Pilotage actif', ''), array('reserve_info', 'Réserve de nuit', '%'), array('reserve_auto_info', 'Réserve automatique', ''),
+				array('active_info', 'Pilotage actif', ''), array('reserve_info', 'Réserve de nuit', '%'), array('reserve_auto_info', 'Réserve automatique', ''), array('threshold_info', 'Seuil batterie prioritaire', '%'),
 			) as $c) {
 				$this->createCmd($c[0], $c[1], 'info', 'numeric', $c[2]);
 			}
@@ -1037,6 +1067,12 @@ class energyManager extends eqLogic {
 				$this->createCmd($c[0], $c[1], 'action', 'other');
 			}
 			$this->createCmd('ecs_answer', 'Réponse ballon (ask)', 'action', 'message');
+			$th = $this->createCmd('threshold_set', 'Définir le seuil batterie prioritaire', 'action', 'slider');
+			if ($th->getConfiguration('minValue', '') === '') {
+				$th->setConfiguration('minValue', 0);
+				$th->setConfiguration('maxValue', 100);
+				$th->save();
+			}
 			$rs = $this->createCmd('reserve_set', 'Définir la réserve de nuit', 'action', 'slider');
 			if ($rs->getConfiguration('minValue', '') === '') {
 				$rs->setConfiguration('minValue', 0);
@@ -1099,7 +1135,7 @@ class energyManager extends eqLogic {
 		$version = jeedom::versionAlias($_version);
 		foreach (array('pv', 'grid', 'batt', 'soc', 'house', 'injection', 'hoy_limit', 'charge_limit', 'inv_limit', 'decision', 'sim_info',
 			'tesla_priority_info', 'batt_target_info', 'slot', 'season', 'prio_tesla', 'prio_battery', 'target_95', 'target_100',
-			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set', 'reserve_auto_info', 'reserve_text', 'reserve_auto_on', 'reserve_auto_off') as $l) {
+			'sim_on', 'sim_off', 'active_info', 'active_on', 'active_off', 'reserve_info', 'reserve_set', 'reserve_auto_info', 'reserve_text', 'reserve_auto_on', 'reserve_auto_off', 'threshold_info', 'threshold_set') as $l) {
 			$c = $this->getCmd(null, $l);
 			$replace['#' . $l . '_id#'] = is_object($c) ? $c->getId() : 0;
 			$replace['#' . $l . '_val#'] = is_object($c) ? addslashes((string) $c->execCmd()) : '';
@@ -1156,6 +1192,13 @@ class energyManagerCmd extends cmd {
 				case 'target_100':   config::save('batt_target', 100, 'energyManager'); break;
 				case 'sim_on':       config::save('simulation', 1, 'energyManager'); break;
 				case 'sim_off':      config::save('simulation', 0, 'energyManager'); break;
+				case 'threshold_set':
+					$v = isset($_options['slider']) ? (float) $_options['slider'] : (float) energyManager::cfg('battery_threshold', 80);
+					$v = max(0, min(100, round($v)));
+					config::save('battery_threshold', $v, 'energyManager');
+					$eq->checkAndUpdateCmd('threshold_info', $v);
+					if ((int) energyManager::cfg('simulation', 1) !== 1) { energyManager::syncTeslaThreshold(); }
+					break;
 				case 'reserve_set':
 					$v = isset($_options['slider']) ? (float) $_options['slider'] : (float) energyManager::cfg('night_reserve', 50);
 					$v = max(0, min(100, round($v)));

@@ -60,6 +60,8 @@
 			<span>Priorité :</span>
 			<a class="btn btn-xs btn-default" id="bpt-#uid#">Tesla</a>
 			<a class="btn btn-xs btn-default" id="bpb-#uid#">Batterie</a>
+			<span title="Priorité Batterie : la batterie charge à pleine puissance jusqu'à ce SOC, puis la Tesla passe d'abord">jusqu'à</span>
+			<input type="range" min="0" max="100" step="5" id="thr-#uid#" style="width:90px"/> <b id="thrv-#uid#"></b>
 			<span>Cible :</span>
 			<a class="btn btn-xs btn-default" id="b95-#uid#">95 %</a>
 			<a class="btn btn-xs btn-default" id="b100-#uid#">100 %</a>
@@ -77,7 +79,7 @@
 		(function () {
 			var uid = '#uid#'
 			var V = { pv: '#pv_val#', grid: '#grid_val#', batt: '#batt_val#', soc: '#soc_val#', house: '#house_val#', inj: '#injection_val#',
-				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', inv: '#inv_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#', rsv: '#reserve_info_val#', rauto: '#reserve_auto_info_val#', rtxt: '#reserve_text_val#' }
+				hoy: '#hoy_limit_val#', chg: '#charge_limit_val#', inv: '#inv_limit_val#', dec: '#decision_val#', sim: '#sim_info_val#', prio: '#tesla_priority_info_val#', tgt: '#batt_target_info_val#', act: '#active_info_val#', thr: '#threshold_info_val#', rsv: '#reserve_info_val#', rauto: '#reserve_auto_info_val#', rtxt: '#reserve_text_val#' }
 			var consumers = #consumers#
 			var el = function (id) { return document.getElementById(id + '-' + uid) }
 			var num = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n }
@@ -104,6 +106,8 @@
 				mark('bpt', V.prio === 'tesla'); mark('bpb', V.prio === 'battery')
 				mark('b95', String(V.tgt) === '95'); mark('b100', String(V.tgt) === '100')
 				mark('bson', String(V.sim) === '1'); mark('bsoff', String(V.sim) !== '1')
+				var th = el('thr'); if (document.activeElement !== th) { th.value = num(V.thr) }
+				el('thrv').textContent = Math.round(num(V.thr)) + ' %'
 				var rs = el('rsv'); if (document.activeElement !== rs) { rs.value = num(V.rsv) }
 				rs.disabled = (String(V.rauto) !== '0')
 				mark('rauto', String(V.rauto) !== '0')
@@ -125,7 +129,7 @@
 			}
 			bind('#pv_id#', 'pv'); bind('#grid_id#', 'grid'); bind('#batt_id#', 'batt'); bind('#soc_id#', 'soc')
 			bind('#house_id#', 'house'); bind('#injection_id#', 'inj'); bind('#hoy_limit_id#', 'hoy'); bind('#inv_limit_id#', 'inv'); bind('#charge_limit_id#', 'chg')
-			bind('#active_info_id#', 'act'); bind('#reserve_info_id#', 'rsv'); bind('#reserve_auto_info_id#', 'rauto'); bind('#reserve_text_id#', 'rtxt'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
+			bind('#active_info_id#', 'act'); bind('#threshold_info_id#', 'thr'); bind('#reserve_info_id#', 'rsv'); bind('#reserve_auto_info_id#', 'rauto'); bind('#reserve_text_id#', 'rtxt'); bind('#decision_id#', 'dec'); bind('#sim_info_id#', 'sim'); bind('#tesla_priority_info_id#', 'prio'); bind('#batt_target_info_id#', 'tgt')
 			consumers.forEach(function (c, i) {
 				if (c.power_id) { jeedom.cmd.update[c.power_id] = function (o) { consumers[i].power = num(o.display_value); render() } }
 				if (c.piloted_id) { jeedom.cmd.update[c.piloted_id] = function (o) { consumers[i].piloted = (String(o.display_value) !== '0') ? 1 : 0; render() } }
@@ -135,6 +139,7 @@
 			act('bpt', '#prio_tesla_id#'); act('bpb', '#prio_battery_id#'); act('b95', '#target_95_id#'); act('b100', '#target_100_id#')
 			act('bson', '#sim_on_id#'); act('bsoff', '#sim_off_id#')
 			el('rauto').onclick = function () { jeedom.cmd.execute({ id: (String(V.rauto) !== '0') ? '#reserve_auto_off_id#' : '#reserve_auto_on_id#' }) }
+			el('thr').onchange = function () { V.thr = this.value; render(); jeedom.cmd.execute({ id: '#threshold_set_id#', value: { slider: this.value } }) }
 			el('rsv').onchange = function () { V.rsv = this.value; render(); jeedom.cmd.execute({ id: '#reserve_set_id#', value: { slider: this.value } }) }
 			el('led').onclick = function () { jeedom.cmd.execute({ id: (String(V.act) !== '0') ? '#active_off_id#' : '#active_on_id#' }) }
 			document.getElementById('cons-' + uid).onclick = function (ev) {

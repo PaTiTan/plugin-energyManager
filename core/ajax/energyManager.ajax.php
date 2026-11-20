@@ -87,6 +87,9 @@ try {
 		if (isset($in['cfg']['batt_target'])) {
 			$cfg['batt_target'] = ((int) $in['cfg']['batt_target'] === 95) ? 95 : 100;
 		}
+		if (isset($in['cfg']['battery_threshold'])) {
+			$cfg['battery_threshold'] = max(0, min(100, (float) $in['cfg']['battery_threshold']));
+		}
 		if (isset($in['cfg']['night_reserve'])) {
 			$cfg['night_reserve'] = max(0, min(100, (float) $in['cfg']['night_reserve']));
 		}

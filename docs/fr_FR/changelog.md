@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- **Priorité Tesla** : la batterie ne se charge pas du tout tant que la Tesla est en mode solaire et qu'elle a de la place ; la Tesla prend toute la puissance disponible. Si la Tesla est pleine ou arrêtée, la batterie reprend la charge.
+- **Priorité Batterie** : la batterie se charge à pleine puissance et la Tesla ne prend que le reste, **jusqu'à un seuil de SOC réglable avec un curseur** (widget et simulateur) ; au-delà, la Tesla passe d'abord. Le seuil est envoyé à teslasmartcharge (`set_seuil_batterie_maison`). Il remplace le 80 % fixe.
+
 ## 0.8.1
 
 - **La Tesla n'attend plus jamais un niveau de batterie.** En priorité Batterie (teslasmartcharge « maison »), la batterie passe d'abord mais la voiture prend tout ce que la batterie n'absorbe pas (l'injection) et charge dès 2 A (460 W). Le simulateur reproduit cette règle. Nécessite teslasmartcharge 1.3.0-beta.

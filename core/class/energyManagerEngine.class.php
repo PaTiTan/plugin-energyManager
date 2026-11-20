@@ -48,6 +48,7 @@ class energyManagerEngine {
 		'min_pv'            => 300,   // W - en dessous, on considère qu'il n'y a pas de soleil
 		'tesla_margin'      => 300,   // W - marge laissée à teslasmartcharge en mode solaire
 		'tesla_priority'    => 'tesla', // 'tesla' ou 'battery'
+		'battery_threshold' => 80,    // % - en priorité Batterie : la batterie passe d'abord jusqu'à ce SOC, puis la Tesla (curseur du widget)
 		'tesla_room_margin' => 500,   // W - la Tesla peut encore absorber si sa puissance est inférieure de plus que cette marge à son maximum
 		'tesla_grace'       => 60,   // s - délai laissé à la Tesla (confirmation 60 s + API) avant d'agir sans elle
 		'tesla_min_w'       => 460,   // W - plus petite charge de teslasmartcharge (2 A x 230 V) ; la plage va jusqu'à 32 A (~7 kW)
@@ -137,12 +138,15 @@ class energyManagerEngine {
 				$teslaEq = $e;
 			}
 		}
+		// Priorité effective : en priorité Batterie, la batterie passe d'abord (charge à pleine puissance) jusqu'au seuil de SOC choisi ;
+		// au-delà, la Tesla passe d'abord comme en priorité Tesla.
+		$prioEff = ($cfg['tesla_priority'] === 'battery' && $soc >= $cfg['battery_threshold']) ? 'tesla' : $cfg['tesla_priority'];
 		// Marge de teslasmartcharge (-300 à +300 W) : négative, elle autorise un soutirage EDF de |marge| W. On l'accepte (pas de réaction).
 		$tolerance = ($teslaSolar && $teslaEq !== null && isset($teslaEq['margin']) && is_numeric($teslaEq['margin'])) ? max(0, -(float) $teslaEq['margin']) : 0;
 		// Priorité Tesla : tant qu'elle peut absorber et qu'elle a eu le temps de réagir, les autres consommateurs
 		// attendent (teslasmartcharge confirme chaque changement pendant 60 s). Une grosse injection n'attend pas.
 		$teslaGraceOver = $mem['inj_any_since'] > 0 && ($now - $mem['inj_any_since']) >= $cfg['tesla_grace'];
-		$teslaHolds = $teslaSolar && $teslaRoom && $cfg['tesla_priority'] === 'tesla'
+		$teslaHolds = $teslaSolar && $teslaRoom && $prioEff === 'tesla'
 			&& !$teslaGraceOver && $injection < $cfg['tesla_hold_max'];
 
 		// Tesla branchée : teslasmartcharge reste en Stand-By tant qu'on ne le met pas en Solaire. On le fait UNE fois par branchement
@@ -192,12 +196,12 @@ class energyManagerEngine {
 		/* ---------- 3. Limite de charge batterie ---------- */
 		$newCharge = $cfg['charge_max'];
 		$reasonCharge = 'charge libre';
-		// Priorité Tesla : batterie à 0 W SEULEMENT une fois la voiture réellement en charge. Tant qu'elle n'a pas démarré (surplus < 2 A,
-		// confirmation de 60 s, réveil...), la batterie garde la charge : teslasmartcharge compte la puissance de charge de la batterie
-		// dans son surplus, donc il démarre quand même, et rien n'est injecté ni perdu.
-		if ($teslaSolar && $cfg['tesla_priority'] === 'tesla' && $teslaPower >= $cfg['tesla_min_w']) {
+		// Priorité Tesla : la batterie ne se charge pas du tout, la Tesla prend toute la puissance disponible. Cela tant que la Tesla est en mode
+		// solaire (branchée) et qu'elle a de la place : si elle est pleine ou arrêtée par teslasmartcharge, la batterie reprend la charge.
+		// Priorité Batterie (sous le seuil de SOC) : la batterie se charge à pleine puissance, la Tesla ne prend que le reste.
+		if ($teslaSolar && $teslaRoom && $prioEff === 'tesla') {
 			$newCharge = 0;
-			$reasonCharge = 'priorité Tesla : batterie à 0 W de charge';
+			$reasonCharge = 'priorité Tesla : la batterie ne charge pas, la Tesla prend toute la puissance';
 		} elseif ($soc >= $cfg['batt_target']) {
 			// batterie "pleine" selon le sélecteur (95 % ou 100 %)
 			$newCharge = 0;

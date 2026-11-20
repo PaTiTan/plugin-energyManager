@@ -288,10 +288,27 @@ $r = energyManagerEngine::decide(base(array('pv' => 6500, 'grid' => -2000, 'equi
 	'mem' => array('inj_any_since' => 1000000 - 900, 'inj_since' => 1000000 - 400))));
 check('Tesla bloquée > 5 min : limitation Hoymiles', ($a = find_action($r, 'hoymiles')) !== null && $a['value'] < 7600);
 
-// 29c. Tesla en mode solaire mais pas encore démarrée : la batterie garde sa charge (teslasmartcharge compte la charge batterie dans son surplus)
+// 29c. Priorité Tesla, Tesla en mode solaire mais pas encore démarrée : la batterie ne se charge pas du tout (la Tesla prendra tout)
 $teslaAttente = array_merge($teslaEnCharge, array('power_real' => 0));
 $r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'batt' => 2000, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaAttente))));
-check('Tesla pas encore démarrée : la charge batterie n\'est pas coupée', find_action($r, 'charge_limit') === null);
+check('priorité Tesla : charge batterie coupée même avant le démarrage de la charge', ($a = find_action($r, 'charge_limit')) !== null && $a['value'] == 0);
+
+// 29c2. Priorité Tesla mais Tesla pleine (plus de place) : la batterie reprend la charge
+$teslaPleineP = array_merge($teslaEnCharge, array('power_real' => 7100));
+$r = energyManagerEngine::decide(base(array('pv' => 7600, 'grid' => 0, 'batt' => 0, 'charge_limit' => 0, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaPleineP), 'mem' => array('tesla_prev_w' => 7100))));
+check('priorité Tesla, Tesla pleine : la batterie recharge', ($a = find_action($r, 'charge_limit')) !== null && $a['value'] == 3680);
+
+// 29c3. Priorité Batterie sous le seuil de SOC : la batterie charge à pleine puissance, pas de coupure
+$r = energyManagerEngine::decide(base(array('soc' => 60, 'charge_limit' => 3680, 'cfg' => array('tesla_priority' => 'battery', 'battery_threshold' => 80), 'equips' => array($teslaEnCharge), 'mem' => array('tesla_prev_w' => 1500))));
+check('priorité Batterie sous le seuil : charge batterie à pleine puissance', find_action($r, 'charge_limit') === null);
+
+// 29c4. Priorité Batterie au-dessus du seuil : la Tesla passe d\'abord (batterie à 0 W)
+$r = energyManagerEngine::decide(base(array('soc' => 85, 'charge_limit' => 3680, 'cfg' => array('tesla_priority' => 'battery', 'battery_threshold' => 80), 'equips' => array($teslaEnCharge), 'mem' => array('tesla_prev_w' => 1500))));
+check('priorité Batterie au-dessus du seuil : la Tesla passe d\'abord', ($a = find_action($r, 'charge_limit')) !== null && $a['value'] == 0);
+
+// 29c5. Le seuil est un curseur : à 100 %, la batterie passe toujours d\'abord
+$r = energyManagerEngine::decide(base(array('soc' => 95, 'charge_limit' => 3680, 'cfg' => array('tesla_priority' => 'battery', 'battery_threshold' => 100), 'equips' => array($teslaEnCharge), 'mem' => array('tesla_prev_w' => 1500))));
+check('seuil à 100 % : la batterie passe d\'abord', find_action($r, 'charge_limit') === null);
 
 // 29d. Tesla en charge (>= 460 W) et priorité Tesla : batterie à 0 W
 $r = energyManagerEngine::decide(base(array('pv' => 3000, 'grid' => 0, 'batt' => 500, 'cfg' => array('tesla_priority' => 'tesla'), 'equips' => array($teslaEnCharge))));
